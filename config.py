@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     thina_public_url: str = "http://127.0.0.1:8080"
     thina_default_city: str = ""
 
+    # Comandos no PC local (lista branca em maps/pc_apps.json)
+    pc_commands_enabled: bool = False
+    pc_apps_map_file: str = "maps/pc_apps.json"
+
     # Mapas e MCP
     areas_map_file: str = "maps/areas.json"
     mcp_server_module: str = "services.gemini_mcp"

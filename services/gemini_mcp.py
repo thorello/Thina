@@ -69,6 +69,8 @@ Conhecimento e pesquisa:
 - Para perguntas gerais (geografia, ciencia, receitas, noticias, clima na cidade, etc.), use a ferramenta Google Search e responda com base nos resultados.
 - Nao recuse perguntas de conhecimento geral: pesquise quando precisar de fatos atuais ou precisos e responda em uma ou duas frases.
 - Para acoes na casa (luzes, sensores, automacoes), use as ferramentas MCP do Home Assistant, nao a pesquisa na web.
+- Para abrir programas no PC (Chrome, Spotify, Calculadora do Windows, etc.) ou sites na web, use abrir_aplicativo e abrir_site — apenas apps da lista permitida.
+- "Abrir a calculadora" / "abre a calculadora" significa o aplicativo Calculadora do Windows, NAO fazer contas matematicas.
 
 Regras:
 - O usuario fala a partir de um comodo especifico (area_id); considere isso no contexto.
@@ -225,6 +227,35 @@ async def ligar_desligar(
         return _json_result({"ok": False, "erro": str(exc)})
 
 
+@mcp.tool
+async def abrir_aplicativo(nome: str) -> str:
+    """
+    Abre um aplicativo permitido no PC onde o servidor Thina esta rodando.
+
+    Args:
+        nome: Nome ou alias do app (ex: chrome, spotify, calculadora).
+    """
+    from services.pc_actions import abrir_aplicativo as _abrir
+
+    result = await _abrir(nome)
+    return _json_result(result)
+
+
+@mcp.tool
+async def abrir_site(url: str, navegador: str | None = None) -> str:
+    """
+    Abre uma pagina web no navegador (http/https).
+
+    Args:
+        url: Endereco completo ou dominio (ex: https://google.com).
+        navegador: Opcional — chrome, edge ou firefox se estiver na lista permitida.
+    """
+    from services.pc_actions import abrir_site as _abrir_site
+
+    result = await _abrir_site(url, navegador)
+    return _json_result(result)
+
+
 def _patch_gemini_mcp_schema_filter() -> None:
     """
     Corrige incompatibilidade google-genai + FastMCP 3.x:
@@ -288,6 +319,48 @@ _HOME_KEYWORDS = (
     "automatiz",
 )
 
+_PC_KEYWORDS = (
+    "abrir ",
+    "abre ",
+    "abra ",
+    "abra a ",
+    "abra o ",
+    "abrir o ",
+    "abre o ",
+    "abre a ",
+    "inicia ",
+    "iniciar ",
+    "iniciar o ",
+    "executa ",
+    "executar ",
+    "liga o ",
+    "liga a ",
+    "chrome",
+    "navegador",
+    "firefox",
+    "edge",
+    "spotify",
+    "discord",
+    "notepad",
+    "bloco de notas",
+    "calculadora",
+    "explorador",
+    "vscode",
+    "visual studio code",
+    "cursor",
+    "aplicativo",
+    "programa ",
+    "no computador",
+    "no pc",
+    "site ",
+    "pagina ",
+    "página ",
+    "google.com",
+    "youtube",
+    "http://",
+    "https://",
+)
+
 
 def _needs_home_tools(texto: str) -> bool:
     """True se o pedido provavelmente exige ferramentas do Home Assistant."""
@@ -295,6 +368,19 @@ def _needs_home_tools(texto: str) -> bool:
         return False
     t = texto.lower()
     return any(k in t for k in _HOME_KEYWORDS)
+
+
+def _needs_pc_tools(texto: str) -> bool:
+    """True se o pedido provavelmente exige abrir app ou site no PC."""
+    if _is_weather_question(texto):
+        return False
+    t = texto.lower()
+    return any(k in t for k in _PC_KEYWORDS)
+
+
+def _needs_mcp_tools(texto: str) -> bool:
+    """Casa (HA) ou PC (apps/sites) — ambos usam o subprocess MCP."""
+    return _needs_home_tools(texto) or _needs_pc_tools(texto)
 
 
 def _build_contents(
@@ -416,6 +502,13 @@ async def processar_mensagem(
 
     Gemini: Google Search (geral) ou MCP (casa). DeepSeek: chat ou MCP (casa).
     """
+    from services.pc_actions import try_pc_fastpath
+
+    fast = await try_pc_fastpath(texto)
+    if fast is not None:
+        logger.info("Resposta Thina fast-path PC (%d caracteres)", len(fast))
+        return fast
+
     settings = get_settings()
 
     if settings.llm_provider == "deepseek":
@@ -430,9 +523,17 @@ async def processar_mensagem(
     client = genai.Client(api_key=settings.gemini_api_key)
     _patch_gemini_mcp_schema_filter()
 
-    usar_mcp = _needs_home_tools(texto)
+    usar_mcp = _needs_mcp_tools(texto)
     usar_pesquisa = settings.gemini_google_search and not usar_mcp
-    modo = "Google Search" if usar_pesquisa else "MCP (casa)"
+    if usar_mcp:
+        if _needs_pc_tools(texto) and _needs_home_tools(texto):
+            modo = "MCP (casa + PC)"
+        elif _needs_pc_tools(texto):
+            modo = "MCP (PC)"
+        else:
+            modo = "MCP (casa)"
+    else:
+        modo = "Google Search"
     logger.info(
         "Processando com Gemini (%s) | modo=%s | texto=%s",
         settings.gemini_model,

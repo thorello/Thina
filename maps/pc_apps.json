@@ -1,0 +1,49 @@
+{
+  "chrome": {
+    "friendly_name": "Google Chrome",
+    "aliases": ["google chrome", "navegador", "navegador chrome"],
+    "windows_cmd": ["cmd", "/c", "start", "", "chrome"]
+  },
+  "edge": {
+    "friendly_name": "Microsoft Edge",
+    "aliases": ["microsoft edge"],
+    "windows_cmd": ["cmd", "/c", "start", "", "msedge"]
+  },
+  "firefox": {
+    "friendly_name": "Mozilla Firefox",
+    "aliases": ["mozilla firefox"],
+    "windows_cmd": ["cmd", "/c", "start", "", "firefox"]
+  },
+  "notepad": {
+    "friendly_name": "Bloco de Notas",
+    "aliases": ["bloco de notas", "notas"],
+    "windows_cmd": ["notepad.exe"]
+  },
+  "calculadora": {
+    "friendly_name": "Calculadora",
+    "aliases": ["calculador", "calc"],
+    "windows_cmd": ["cmd", "/c", "start", "", "calc"]
+  },
+  "explorer": {
+    "friendly_name": "Explorador de Arquivos",
+    "aliases": ["explorador", "explorador de arquivos", "pastas"],
+    "windows_cmd": ["explorer.exe"]
+  },
+  "spotify": {
+    "friendly_name": "Spotify",
+    "windows_cmd": ["cmd", "/c", "start", "", "spotify"]
+  },
+  "discord": {
+    "friendly_name": "Discord",
+    "windows_cmd": ["cmd", "/c", "start", "", "discord"]
+  },
+  "vscode": {
+    "friendly_name": "Visual Studio Code",
+    "aliases": ["visual studio code", "code"],
+    "windows_cmd": ["cmd", "/c", "start", "", "code"]
+  },
+  "cursor": {
+    "friendly_name": "Cursor",
+    "windows_cmd": ["cmd", "/c", "start", "", "cursor"]
+  }
+}

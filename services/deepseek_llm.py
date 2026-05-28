@@ -23,6 +23,8 @@ from services.gemini_mcp import (
     THINA_SYSTEM_INSTRUCTION,
     _build_user_prompt,
     _needs_home_tools,
+    _needs_mcp_tools,
+    _needs_pc_tools,
 )
 from services.ha_client import HAAuthError, HAConnectionError
 
@@ -219,9 +221,17 @@ async def processar_mensagem_deepseek(
     if not settings.deepseek_api_key:
         raise ValueError("DEEPSEEK_API_KEY nao configurada.")
 
-    usar_mcp = _needs_home_tools(texto)
+    usar_mcp = _needs_mcp_tools(texto)
     messages = _messages_for_request(texto, area_id, historico, usar_mcp=usar_mcp)
-    modo = "MCP (casa)" if usar_mcp else "chat"
+    if usar_mcp:
+        if _needs_pc_tools(texto) and _needs_home_tools(texto):
+            modo = "MCP (casa + PC)"
+        elif _needs_pc_tools(texto):
+            modo = "MCP (PC)"
+        else:
+            modo = "MCP (casa)"
+    else:
+        modo = "chat"
     logger.info(
         "Processando com DeepSeek (%s) | modo=%s | texto=%s",
         settings.deepseek_model,

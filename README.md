@@ -45,6 +45,16 @@ copy .env.example .env
 | `KOKORO_VOICE` | Voz principal (`thina_mix` = media de `pf_dora` + `if_sara` no repo Kokoro) |
 | `KOKORO_MIX_VOICE` / `KOKORO_MIX_AMOUNT` | Mistura manual opcional (ex. `pf_dora` + `if_sara` a `0.5`) |
 | `THINA_PUBLIC_URL` | URL **acessível pelo host do HA** para baixar o WAV (não use `localhost` se o HA estiver noutra máquina/Docker) |
+| `PC_COMMANDS_ENABLED` | `true` para abrir apps/sites no **PC onde o thina-server roda** (lista branca em `maps/pc_apps.json`) |
+| `PC_APPS_MAP_FILE` | Caminho do mapa de aplicativos permitidos (padrão: `maps/pc_apps.json`) |
+
+### Comandos no PC (Chrome, Spotify, etc.)
+
+Com `PC_COMMANDS_ENABLED=true`, a Thina pode abrir programas no Windows do host do servidor — por exemplo: *“Thina, abre o Google Chrome”* ou *“abre o Spotify”*.
+
+- Só funcionam apps listados em [`maps/pc_apps.json`](maps/pc_apps.json) (segurança: lista branca, sem comando arbitrário).
+- O servidor Thina precisa rodar **na mesma máquina** que você quer controlar (não num Raspberry Pi remoto sem área de trabalho).
+- Para adicionar um app, edite o JSON com `windows_cmd` ou `windows_path` e reinicie o servidor (ou recarregue o processo).
 
 ### Mapa de cômodos
 

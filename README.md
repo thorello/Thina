@@ -56,6 +56,22 @@ Com `PC_COMMANDS_ENABLED=true`, a Thina pode abrir programas no Windows do host 
 - O servidor Thina precisa rodar **na mesma máquina** que você quer controlar (não num Raspberry Pi remoto sem área de trabalho).
 - Para adicionar um app, edite o JSON com `windows_cmd` ou `windows_path` e reinicie o servidor (ou recarregue o processo).
 
+#### Spotify — pausar e trocar faixas
+
+Com `PC_COMMANDS_ENABLED=true`, a Thina envia **teclas de mídia do Windows** (play/pause, próxima, anterior) para o player ativo — em geral o app Spotify no PC.
+
+Exemplos de voz:
+
+- *“Thina, pausa o Spotify”* / *“pausa a música”*
+- *“continua a música”* / *“toca de novo”*
+- *“próxima música”* / *“pula essa faixa”*
+- *“música anterior”*
+
+Requisitos:
+
+- O **Spotify desktop** deve estar instalado e, de preferência, já ter tocado algo na sessão (para o Windows reconhecer como app de mídia ativo).
+- O `thina-server` roda no **mesmo PC** onde o Spotify está aberto (ou em segundo plano na bandeja).
+
 ### Mapa de cômodos
 
 Edite [`maps/areas.json`](maps/areas.json):

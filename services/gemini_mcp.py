@@ -70,6 +70,7 @@ Conhecimento e pesquisa:
 - Nao recuse perguntas de conhecimento geral: pesquise quando precisar de fatos atuais ou precisos e responda em uma ou duas frases.
 - Para acoes na casa (luzes, sensores, automacoes), use as ferramentas MCP do Home Assistant, nao a pesquisa na web.
 - Para abrir programas no PC (Chrome, Spotify, Calculadora do Windows, etc.) ou sites na web, use abrir_aplicativo e abrir_site — apenas apps da lista permitida.
+- Para pausar, retomar, pular ou voltar musica no Spotify do PC, use controlar_spotify (pausar, tocar, proxima, anterior).
 - "Abrir a calculadora" / "abre a calculadora" significa o aplicativo Calculadora do Windows, NAO fazer contas matematicas.
 
 Regras:
@@ -242,6 +243,22 @@ async def abrir_aplicativo(nome: str) -> str:
 
 
 @mcp.tool
+async def controlar_spotify(
+    acao: Literal["pausar", "tocar", "proxima", "anterior"],
+) -> str:
+    """
+    Controla reproducao no Spotify (ou player de midia ativo) no PC do servidor.
+
+    Args:
+        acao: pausar (ou retomar se ja pausado), tocar, proxima faixa, faixa anterior.
+    """
+    from services.spotify_pc import controlar_spotify as _controlar
+
+    result = await _controlar(acao)
+    return _json_result(result)
+
+
+@mcp.tool
 async def abrir_site(url: str, navegador: str | None = None) -> str:
     """
     Abre uma pagina web no navegador (http/https).
@@ -340,6 +357,19 @@ _PC_KEYWORDS = (
     "firefox",
     "edge",
     "spotify",
+    "musica",
+    "música",
+    "faixa",
+    "playlist",
+    "pausa ",
+    "pausar",
+    "pause ",
+    "pula ",
+    "pular ",
+    "proxima",
+    "próxima",
+    "anterior ",
+    "skip",
     "discord",
     "notepad",
     "bloco de notas",
@@ -505,6 +535,12 @@ async def processar_mensagem(
     Gemini: Google Search (geral) ou MCP (casa). DeepSeek: chat ou MCP (casa).
     """
     from services.pc_actions import try_pc_fastpath
+    from services.spotify_pc import try_spotify_fastpath
+
+    fast = await try_spotify_fastpath(texto)
+    if fast is not None:
+        logger.info("Resposta Thina fast-path Spotify (%d caracteres)", len(fast))
+        return fast
 
     fast = await try_pc_fastpath(texto)
     if fast is not None:

@@ -87,6 +87,18 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.ensure_audio_dir()
 
+    llm_model = (
+        settings.deepseek_model
+        if settings.llm_provider == "deepseek"
+        else settings.gemini_model
+    )
+    logger.info(
+        "LLM ativo: provider=%s | model=%s | chave_ok=%s",
+        settings.llm_provider,
+        llm_model,
+        settings.llm_api_key_configured(),
+    )
+
     try:
         _areas_map = settings.load_areas_map()
         logger.info("Mapa de areas carregado: %s", list(_areas_map.keys()))
@@ -112,7 +124,18 @@ app = FastAPI(
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "thina"}
+    settings = get_settings()
+    llm_model = (
+        settings.deepseek_model
+        if settings.llm_provider == "deepseek"
+        else settings.gemini_model
+    )
+    return {
+        "status": "ok",
+        "service": "thina",
+        "llm_provider": settings.llm_provider,
+        "llm_model": llm_model,
+    }
 
 
 @app.get("/v1/audio/{audio_id}.wav")
@@ -170,11 +193,9 @@ async def conversar(body: ConversarRequest, request: Request) -> ConversarRespon
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Falha no Gemini/MCP")
-        raise HTTPException(
-            status_code=503,
-            detail="Falha ao processar mensagem com Gemini/MCP.",
-        ) from exc
+        logger.exception("Falha no LLM/MCP")
+        detail = str(exc).strip() or "Falha ao processar mensagem com o assistente."
+        raise HTTPException(status_code=503, detail=detail) from exc
 
     # --- Etapa 3: Kokoro TTS ---
     try:

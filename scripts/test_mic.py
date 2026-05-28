@@ -5,7 +5,8 @@ Fluxo padrao:
   2. Bip duplo nos altifalantes = pronta para ouvir o pedido
   3. Grava o pedido ate voce parar de falar (silencio)
   4. Envia para Thina e reproduz a resposta
-  5. Volta a escutar (modo loop)
+  5. Continua a mesma conversa (sem 'Tina') ate voce dizer 'Tina' de novo
+  6. Volta ao passo 1 quando a sessao terminar ou apos 'Tina' (nova conversa)
 
 Uso:
   .\\test-mic.ps1
@@ -20,7 +21,9 @@ import argparse
 import json
 import re
 import sys
+import threading
 import time
+import uuid
 import wave
 import zipfile
 from pathlib import Path
@@ -226,9 +229,19 @@ def record_until_silence(
     *,
     max_seconds: float = 8.0,
     silence_seconds: float = 1.0,
-    rms_threshold: float = 0.015,
+    rms_threshold: float = 0.012,
+    lead_in_seconds: float = 0.0,
+    pre_roll_seconds: float = 0.55,
+    beep_guard_seconds: float = 0.0,
+    empty_error: str = "Nenhuma fala detectada. Fale mais perto do microfone.",
 ) -> bytes:
-    """Grava ate detectar silencio apos fala (100 ms por bloco)."""
+    """
+    Grava ate detectar silencio apos fala (100 ms por bloco).
+
+    pre_roll_seconds: mantem audio antes do VAD disparar (evita cortar a 1a palavra).
+    beep_guard_seconds: no inicio, nao dispara VAD (evita falso positivo do bip no mic).
+    lead_in_seconds: tempo maximo esperando a fala comecar antes de desistir.
+    """
     import numpy as np
     import sounddevice as sd
 
@@ -236,8 +249,12 @@ def record_until_silence(
     block = int(SAMPLE_RATE * block_ms)
     max_blocks = int(max_seconds / block_ms)
     silence_blocks = int(silence_seconds / block_ms)
+    lead_blocks = int(lead_in_seconds / block_ms) if lead_in_seconds > 0 else 0
+    pre_roll_max = max(1, int(pre_roll_seconds / block_ms)) if pre_roll_seconds > 0 else 0
+    beep_guard_blocks = int(beep_guard_seconds / block_ms) if beep_guard_seconds > 0 else 0
 
     chunks: list[np.ndarray] = []
+    pre_roll: list[np.ndarray] = []
     silent_run = 0
     speech_started = False
 
@@ -248,11 +265,16 @@ def record_until_silence(
         device=device,
         blocksize=block,
     ) as stream:
-        for _ in range(max_blocks):
+        for block_idx in range(max_blocks):
             data, _ = stream.read(block)
             rms = float(np.sqrt(np.mean(np.square(data))))
-            if rms >= rms_threshold:
-                speech_started = True
+            in_beep_guard = block_idx < beep_guard_blocks
+
+            if rms >= rms_threshold and not in_beep_guard:
+                if not speech_started:
+                    speech_started = True
+                    chunks.extend(pre_roll)
+                    pre_roll.clear()
                 silent_run = 0
                 chunks.append(data.copy())
             elif speech_started:
@@ -260,13 +282,58 @@ def record_until_silence(
                 silent_run += 1
                 if silent_run >= silence_blocks:
                     break
+            else:
+                if pre_roll_max:
+                    pre_roll.append(data.copy())
+                    if len(pre_roll) > pre_roll_max:
+                        pre_roll.pop(0)
+                if lead_blocks and block_idx >= lead_blocks:
+                    break
 
     if not chunks:
-        raise RuntimeError("Nenhuma fala detectada apos 'Tina'. Fale mais perto do microfone.")
+        raise RuntimeError(empty_error)
 
     audio = np.concatenate(chunks, axis=0).flatten()
     pcm = (audio * 32767).astype("int16").tobytes()
     return pcm
+
+
+def record_with_ready_beep(
+    device: int | None,
+    output_device: int | None = None,
+    **record_kwargs: object,
+) -> bytes:
+    """
+    Abre o microfone, toca o bip e grava em paralelo.
+
+    Assim a fala que comeca no fim do bip nao perde a primeira palavra.
+    """
+    result: dict[str, bytes | Exception | None] = {"pcm": None, "error": None}
+
+    def worker() -> None:
+        try:
+            result["pcm"] = record_until_silence(
+                device,
+                beep_guard_seconds=0.4,
+                pre_roll_seconds=0.55,
+                **record_kwargs,  # type: ignore[arg-type]
+            )
+        except RuntimeError as exc:
+            result["error"] = exc
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    time.sleep(0.1)
+    play_ready_beep(output_device)
+    max_wait = float(record_kwargs.get("max_seconds", 10)) + 5.0
+    thread.join(timeout=max_wait)
+    if thread.is_alive():
+        raise RuntimeError("Timeout na gravacao do microfone.")
+    if result["error"] is not None:
+        raise result["error"]
+    if result["pcm"] is None:
+        raise RuntimeError("Nenhuma fala detectada. Fale mais perto do microfone.")
+    return result["pcm"]
 
 
 def record_fixed_seconds(seconds: float, device: int | None) -> bytes:
@@ -339,7 +406,12 @@ def _wake_from_recognizer(rec, chunk: bytes) -> str | None:
     return None
 
 
-def wait_for_wake_word(device: int | None, *, verbose: bool = True) -> str | None:
+def wait_for_wake_word(
+    device: int | None,
+    *,
+    verbose: bool = True,
+    output_device: int | None = None,
+) -> str | None:
     """Escuta o microfone ate detectar Tina/Thina. Retorna texto da mesma frase, se houver."""
     import sounddevice as sd
     from vosk import KaldiRecognizer
@@ -385,6 +457,7 @@ def wait_for_wake_word(device: int | None, *, verbose: bool = True) -> str | Non
             hit = _wake_from_recognizer(rec_wake, chunk) or _wake_from_recognizer(rec_open, chunk)
             if hit:
                 print(f"  Ativacao: {hit!r}")
+                play_ready_beep(output_device)
                 return hit
 
             if verbose:
@@ -405,6 +478,7 @@ def capture_command_after_wake(
     *,
     whisper_model: str,
     output_device: int | None = None,
+    skip_initial_beep: bool = False,
 ) -> str:
     """Extrai comando da frase de ativacao ou grava ate silencio."""
     if wake_phrase:
@@ -413,9 +487,32 @@ def capture_command_after_wake(
             print(f"Pedido (mesma frase): {cmd!r}")
             return cmd
 
-    play_ready_beep(output_device)
     print("Pode falar agora.")
-    pcm = record_until_silence(device)
+    record_kw = {
+        "max_seconds": 10.0,
+        "silence_seconds": 1.2,
+        "lead_in_seconds": 6.0,
+    }
+    for attempt in range(2):
+        try:
+            if skip_initial_beep:
+                pcm = record_until_silence(
+                    device,
+                    pre_roll_seconds=0.55,
+                    **record_kw,
+                )
+            else:
+                pcm = record_with_ready_beep(
+                    device,
+                    output_device,
+                    **record_kw,
+                )
+            break
+        except RuntimeError:
+            if attempt == 0:
+                print("Nao ouvi nada. Tente de novo apos o bip...")
+                continue
+            raise
     pcm_to_wav(wav_path, pcm)
     print(f"Gravacao: {len(pcm)} bytes (~{len(pcm) / 2 / SAMPLE_RATE:.1f}s)")
     text = transcribe_pcm(pcm, wav_path, whisper_model=whisper_model, use_vosk=True)
@@ -423,10 +520,23 @@ def capture_command_after_wake(
     return text
 
 
-def conversar(thina: str, texto: str, area_id: str, timeout: float) -> dict:
+def conversar(
+    thina: str,
+    texto: str,
+    area_id: str,
+    timeout: float,
+    *,
+    session_id: str | None = None,
+    nova_sessao: bool = False,
+) -> dict:
     import urllib.request
 
-    body = json.dumps({"texto": texto, "area_id": area_id}).encode()
+    payload: dict[str, object] = {"texto": texto, "area_id": area_id}
+    if session_id:
+        payload["session_id"] = session_id
+    if nova_sessao:
+        payload["nova_sessao"] = True
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{thina}/v1/conversar",
         data=body,
@@ -516,16 +626,140 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def capture_followup(
+    device: int | None,
+    wav_path: Path,
+    *,
+    whisper_model: str,
+    output_device: int | None = None,
+) -> tuple[str, bool]:
+    """
+    Escuta continuacao com Vosk em tempo real.
+
+    Ao reconhecer 'Tina', toca o bip na hora e segue gravando o pedido na mesma sessao.
+  """
+    import sounddevice as sd
+    from vosk import KaldiRecognizer
+
+    model = get_vosk_model()
+    print("\nPode continuar falando... (diga 'Tina' para comecar conversa nova)")
+
+    block_samples = 4000
+    block_s = block_samples / SAMPLE_RATE
+    silence_blocks = max(1, int(1.4 / block_s))
+    max_blocks = int(14.0 / block_s)
+    beep_guard_blocks = max(1, int(0.45 / block_s))
+    rms_threshold = 0.012
+    wait_after_wake_blocks = max(1, int(7.0 / block_s))
+
+    rec_wake = KaldiRecognizer(model, SAMPLE_RATE)
+    try:
+        rec_wake.SetGrammar(WAKE_GRAMMAR)
+    except Exception:
+        rec_wake = KaldiRecognizer(model, SAMPLE_RATE)
+
+    pcm_chunks: list[bytes] = []
+    speech_started = False
+    silent_run = 0
+    nova_sessao = False
+    after_wake = False
+    blocks_after_beep = 0
+    heard_command_after_wake = False
+
+    with sd.RawInputStream(
+        samplerate=SAMPLE_RATE,
+        blocksize=block_samples,
+        dtype="int16",
+        channels=CHANNELS,
+        device=device,
+    ) as stream:
+        for _block_idx in range(max_blocks):
+            data, _ = stream.read(block_samples)
+            chunk = as_pcm_bytes(data)
+            pcm_chunks.append(chunk)
+            rms = pcm_chunk_rms(chunk)
+
+            if not after_wake:
+                if _wake_from_recognizer(rec_wake, chunk):
+                    play_ready_beep(output_device)
+                    print("Nova conversa.")
+                    nova_sessao = True
+                    after_wake = True
+                    blocks_after_beep = 0
+                    silent_run = 0
+                    speech_started = False
+                    heard_command_after_wake = False
+
+            if after_wake:
+                blocks_after_beep += 1
+                in_guard = blocks_after_beep <= beep_guard_blocks
+                if rms >= rms_threshold and not in_guard:
+                    heard_command_after_wake = True
+            else:
+                in_guard = False
+
+            if rms >= rms_threshold and not in_guard:
+                speech_started = True
+                silent_run = 0
+            elif speech_started:
+                silent_run += 1
+                if silent_run >= silence_blocks:
+                    break
+            elif after_wake and blocks_after_beep >= wait_after_wake_blocks:
+                break
+
+    if not pcm_chunks:
+        raise RuntimeError("Nenhuma fala detectada. Diga algo ou 'Tina' para recomecar.")
+
+    pcm = b"".join(pcm_chunks)
+    pcm_to_wav(wav_path, pcm)
+    print(f"Gravacao: {len(pcm)} bytes (~{len(pcm) / 2 / SAMPLE_RATE:.1f}s)")
+    text = transcribe_pcm(pcm, wav_path, whisper_model=whisper_model, use_vosk=True)
+    print(f"Texto reconhecido: {text!r}")
+
+    if not text or text.strip().lower() in ("[unk]", "unk"):
+        raise RuntimeError("Nao entendi o audio. Repita, por favor.")
+
+    if not nova_sessao:
+        return text, False
+
+    cmd = strip_wake_word(text)
+    if len(cmd) >= 3:
+        print(f"Pedido (mesma frase): {cmd!r}")
+        return cmd, True
+
+    if not heard_command_after_wake:
+        raise RuntimeError(
+            "Nao ouvi o pedido apos 'Tina'. Fale logo apos o bip, na mesma respiracao ou em seguida."
+        )
+
+    if len(cmd) >= 1:
+        return cmd, True
+
+    raise RuntimeError(
+        "Nao entendi o pedido apos 'Tina'. Fale logo apos o bip, na mesma respiracao ou em seguida."
+    )
+
+
 def run_interaction(
     args: argparse.Namespace,
     thina: str,
     mic_wav: Path,
-) -> bool:
-    """Uma rodada completa. Retorna False se deve parar o loop."""
+    *,
+    session_id: str | None,
+    in_conversation: bool,
+) -> tuple[bool, str | None, bool]:
+    """
+    Uma rodada completa.
+
+    Retorna (continuar_loop, session_id, in_conversation).
+    """
     t_total = time.time()
+    nova_sessao = False
 
     if args.texto.strip():
         texto = args.texto.strip()
+        nova_sessao = True
         print(f"Texto manual: {texto!r}")
     elif args.no_wake:
         print(f"\nGravando {args.seconds:.0f}s (sem wake word)...")
@@ -534,17 +768,42 @@ def run_interaction(
             pcm, mic_wav, whisper_model=args.whisper_model, use_vosk=True
         )
         print(f"Texto reconhecido: {texto!r}")
+        nova_sessao = True
+    elif in_conversation:
+        texto, nova_sessao = capture_followup(
+            args.device,
+            mic_wav,
+            whisper_model=args.whisper_model,
+            output_device=args.output_device,
+        )
     else:
-        wake = wait_for_wake_word(args.device, verbose=not args.quiet)
+        nova_sessao = True
+        wake = wait_for_wake_word(
+            args.device,
+            verbose=not args.quiet,
+            output_device=args.output_device,
+        )
         texto = capture_command_after_wake(
             wake,
             args.device,
             mic_wav,
             whisper_model=args.whisper_model,
             output_device=args.output_device,
+            skip_initial_beep=True,
         )
 
-    data = conversar(thina, texto, args.area_id, timeout=120.0)
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
+    data = conversar(
+        thina,
+        texto,
+        args.area_id,
+        timeout=120.0,
+        session_id=session_id,
+        nova_sessao=nova_sessao,
+    )
+    session_id = data.get("session_id") or session_id
     print(f"  resposta: {data.get('resposta', '')[:300]}")
     print(f"  audio_url: {data.get('audio_url')}")
     print(f"  media_player: {data.get('media_player')}")
@@ -554,9 +813,13 @@ def run_interaction(
         wav = download_wav(thina, audio_url)
         print(f"  wav: {len(wav)} bytes")
         play_wav_bytes(wav, args.output_device)
+        # Evita o microfone captar eco da propria resposta no turno seguinte
+        time.sleep(0.35)
 
     print(f"\nTempo total desta rodada: {time.time() - t_total:.1f}s")
-    return True
+    if args.no_wake or args.texto.strip():
+        return False, session_id, False
+    return True, session_id, True
 
 
 def main() -> int:
@@ -579,6 +842,7 @@ def main() -> int:
     print(f"Thina: {thina} | area_id: {args.area_id} | voz: {voz}")
     if not args.no_wake and not args.texto.strip():
         print("Modo: diga 'Tina' e em seguida seu pedido (para no silencio).")
+        print("Depois da resposta, continue falando sem 'Tina'; diga 'Tina' de novo para nova conversa.")
         print_input_device(args.device)
     if not settings.llm_api_key_configured():
         key_name = "DEEPSEEK_API_KEY" if settings.llm_provider == "deepseek" else "GEMINI_API_KEY"
@@ -589,11 +853,32 @@ def main() -> int:
         if not args.no_wake and not args.texto.strip():
             get_vosk_model()
 
+        session_id: str | None = None
+        in_conversation = False
+
         while True:
-            run_interaction(args, thina, mic_wav)
-            if args.once or args.texto.strip():
+            try:
+                continuar, session_id, in_conversation = run_interaction(
+                    args,
+                    thina,
+                    mic_wav,
+                    session_id=session_id,
+                    in_conversation=in_conversation,
+                )
+            except RuntimeError as exc:
+                msg = str(exc).lower()
+                if "fala detectada" in msg or "nao entendi" in msg or "repita" in msg:
+                    print(f"AVISO: {exc}")
+                    print("Tente de novo...")
+                    continuar = True
+                else:
+                    raise
+            if not continuar:
                 break
-            print("\n--- Aguardando 'Tina' de novo ---")
+            if in_conversation:
+                print("\n--- Mesma conversa: fale de novo ou diga 'Tina' para recomecar ---")
+            else:
+                print("\n--- Aguardando 'Tina' ---")
     except KeyboardInterrupt:
         print("\nEncerrado.")
         return 0

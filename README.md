@@ -114,9 +114,12 @@ Healthcheck: `GET http://localhost:<THINA_PORT>/health`
 {
   "texto": "liga a luz da sala",
   "area_id": "sala",
-  "session_id": null
+  "session_id": "uuid-da-conversa",
+  "nova_sessao": false
 }
 ```
+
+Reutilize o mesmo `session_id` nos turnos seguintes para manter o contexto. Envie `"nova_sessao": true` (por exemplo ao dizer «Tina» de novo) para limpar o histórico.
 
 Resposta:
 
@@ -125,7 +128,8 @@ Resposta:
   "resposta": "Pronto, liguei a luz da sala.",
   "audio_url": "http://192.168.1.100:8080/v1/audio/abc123.wav",
   "area_id": "sala",
-  "media_player": "media_player.respeaker_sala"
+  "media_player": "media_player.respeaker_sala",
+  "session_id": "uuid-da-conversa"
 }
 ```
 

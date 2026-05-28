@@ -1,0 +1,78 @@
+# Package Home Assistant — Thina + satélites ReSpeaker Lite
+#
+# Instalação:
+#   1. Copie para config/packages/thina_respeaker.yaml
+#   2. Ajuste URL do Thina e area_id / device_id abaixo
+#   3. Em configuration.yaml: homeassistant: packages: !include_dir_named packages
+#
+# Pré-requisitos:
+#   - thina-server a correr (ex. :8081)
+#   - maps/areas.json com chaves = area_id usados aqui
+#   - ReSpeaker Lite como satélite Assist em cada área
+
+rest_command:
+  thina_conversar:
+    # IP/porta do PC onde corre o Thina (ou host.docker.internal se HA em Docker no mesmo host)
+    url: "http://192.168.1.50:8081/v1/conversar"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+    content_type: "application/json"
+    payload: >
+      {
+        "texto": {{ texto | tojson }},
+        "area_id": {{ area_id | tojson }}
+      }
+
+automation:
+  - id: thina_respeaker_pipeline_end
+    alias: Thina - voz ReSpeaker (assist_pipeline_end)
+    description: Envia STT do satélite para o thina-server
+    mode: queued
+    max: 5
+    trigger:
+      - platform: event
+        event_type: assist_pipeline_end
+    condition:
+      - condition: template
+        value_template: >
+          {{ trigger.event.data.get('stt_output', {}).get('text', '') | trim | length > 0 }}
+    action:
+      - variables:
+          texto: "{{ trigger.event.data.stt_output.text | trim }}"
+          device_id: "{{ trigger.event.data.device_id | default('') }}"
+          area_slug: "{{ area_id(device_id) if device_id else '' }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ area_slug | length > 0 }}"
+            sequence:
+              - action: rest_command.thina_conversar
+                data:
+                  texto: "{{ texto }}"
+                  area_id: "{{ area_slug }}"
+        default:
+          - action: logbook.log
+            data:
+              name: Thina
+              message: >
+                Satelite sem area ou area_id desconhecido (device_id={{ device_id }}).
+                Atribua o ReSpeaker a uma area no HA e alinhe maps/areas.json.
+
+# --- Opcional: automações fixas por dispositivo (descomente e preencha device_id) ---
+#
+#  - id: thina_respeaker_sala
+#    alias: Thina - ReSpeaker Sala
+#    trigger:
+#      - platform: event
+#        event_type: assist_pipeline_end
+#        event_data:
+#          device_id: "SUBSTITUA_PELO_DEVICE_ID_DA_SALA"
+#    condition:
+#      - condition: template
+#        value_template: "{{ trigger.event.data.get('stt_output', {}).get('text', '') | length > 0 }}"
+#    action:
+#      - action: rest_command.thina_conversar
+#        data:
+#          texto: "{{ trigger.event.data.stt_output.text }}"
+#          area_id: "sala"

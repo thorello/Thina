@@ -1,0 +1,46 @@
+# Segredos e ambiente local
+.env
+.env.local
+.env.*.local
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Dados de execução (áudio TTS, PIDs, logs de serviços)
+data/audio/*
+!data/audio/.gitkeep
+data/run/*
+!data/run/.gitkeep
+data/*.log
+*.wav
+*.mp3
+*.ogg
+*.pid
+
+# Cache de modelos (Whisper / Hugging Face, se baixados no projeto)
+.cache/
+models/
+
+# IDE e SO
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

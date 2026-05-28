@@ -66,6 +66,9 @@ class Settings(BaseSettings):
 
     # Mapas e MCP
     areas_map_file: str = "maps/areas.json"
+    thina_user_context_file: str = "maps/thina_user.md"
+    thina_user_private_file: str = "maps/thina_user.private.md"
+    thina_private_dir: str = "maps/private"
     mcp_server_module: str = "services.gemini_mcp"
 
     # Timeouts (segundos)
@@ -103,6 +106,27 @@ class Settings(BaseSettings):
     @property
     def areas_map_path(self) -> Path:
         path = Path(self.areas_map_file)
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        return path
+
+    @property
+    def thina_user_context_path(self) -> Path:
+        path = Path(self.thina_user_context_file)
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        return path
+
+    @property
+    def thina_user_private_path(self) -> Path:
+        path = Path(self.thina_user_private_file)
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        return path
+
+    @property
+    def thina_private_dir_path(self) -> Path:
+        path = Path(self.thina_private_dir)
         if not path.is_absolute():
             path = BASE_DIR / path
         return path

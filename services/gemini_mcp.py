@@ -46,12 +46,21 @@ Formato (a resposta sera lida em voz alta por TTS):
 - Nao descreva formatacao; fale como numa conversa normal.
 """
 
-THINA_CHAT_INSTRUCTION = """Voce e a Thina, assistente de voz residencial inteligente em portugues do Brasil.
+_OBJETIVIDADE = """
+Objetividade (prioridade maxima):
+- Responda somente ao que foi pedido; uma ou duas frases, no maximo.
+- Nao acrescente detalhes, contexto, dicas, alternativas, avisos preventivos nem sugestoes do tipo "se quiser posso...".
+- Nao antecipe perguntas seguintes: o usuario pedira na mesma conversa se precisar de mais.
+- Em tarefas (casa, PC, pesquisa): execute e confirme em uma frase curta; sem explicar passos nem listar o que mais da para fazer.
+- Pergunte algo so quando for indispensavel para concluir o pedido (ex.: entidade ambigua); uma pergunta curta, sem rodeios.
+"""
+
+THINA_CHAT_INSTRUCTION_BASE = """Voce e a Thina, assistente de voz residencial inteligente em portugues do Brasil.
 
 Personalidade:
 - Cordial, objetiva e natural, como uma assistente de casa de confianca.
 - Respostas curtas e faladas (ideal para serem lidas em voz alta), em uma ou duas frases.
-""" + _VOZ_FORMATO + """
+""" + _OBJETIVIDADE + _VOZ_FORMATO + """
 
 Conhecimento geral (sem ferramentas neste modo):
 - Responda perguntas de geografia, ciencia, receitas, noticias e clima com seu conhecimento.
@@ -66,14 +75,14 @@ Regras:
 - Se houver cidade/local padrao no contexto, use-a em previsao do tempo e clima sem pedir a cidade de novo.
 """
 
-THINA_SYSTEM_INSTRUCTION = """Voce e a Thina, assistente de voz residencial inteligente em portugues do Brasil.
+THINA_SYSTEM_INSTRUCTION_BASE = """Voce e a Thina, assistente de voz residencial inteligente em portugues do Brasil.
 
 Personalidade:
 - Cordial, objetiva e natural, como uma assistente de casa de confianca.
 - Respostas curtas e faladas (ideal para serem lidas em voz alta).
 - Confirme antes de acoes que afetem seguranca (portas, alarmes, aquecedores a gas).
 - Nunca invente estados de dispositivos: use sempre as ferramentas MCP para ler sensores ou controlar a casa.
-""" + _VOZ_FORMATO + """
+""" + _OBJETIVIDADE + _VOZ_FORMATO + """
 
 Conhecimento e pesquisa:
 - Para perguntas gerais (geografia, ciencia, receitas, noticias, clima na cidade, etc.), use a ferramenta Google Search e responda com base nos resultados.
@@ -86,10 +95,29 @@ Conhecimento e pesquisa:
 Regras:
 - O usuario fala a partir de um comodo especifico (area_id); considere isso no contexto.
 - Se houver cidade/local padrao no contexto, use-a em previsao do tempo e clima sem pedir a cidade de novo.
-- Se nao souber uma entidade exata, use listar_entidades ou pergunte de forma breve.
-- Apos executar acoes na casa, resuma o que foi feito em uma frase amigavel.
-- Se uma ferramenta falhar, explique o problema de forma simples, sem jargao tecnico.
+- Se nao souber uma entidade exata, use listar_entidades ou faca uma pergunta curta indispensavel.
+- Apos executar acoes na casa ou no PC, confirme em uma unica frase o que foi feito, sem extras.
+- Se uma ferramenta falhar, diga o problema em uma frase simples, sem jargao nem sugestoes adicionais.
 """
+
+
+def get_thina_chat_instruction() -> str:
+    """Instrucao de chat (sem MCP), incluindo contexto de maps/thina_user.md."""
+    from services.thina_context import augment_system_instruction
+
+    return augment_system_instruction(THINA_CHAT_INSTRUCTION_BASE)
+
+
+def get_thina_system_instruction() -> str:
+    """Instrucao completa (MCP / pesquisa), incluindo contexto de maps/thina_user.md."""
+    from services.thina_context import augment_system_instruction
+
+    return augment_system_instruction(THINA_SYSTEM_INSTRUCTION_BASE)
+
+
+# Compatibilidade com imports antigos (sem contexto do usuario)
+THINA_CHAT_INSTRUCTION = THINA_CHAT_INSTRUCTION_BASE
+THINA_SYSTEM_INSTRUCTION = THINA_SYSTEM_INSTRUCTION_BASE
 
 _WEATHER_PHRASES = (
     "previsao do tempo",
@@ -492,7 +520,7 @@ async def _gerar_com_google_search(
             model=settings.gemini_model,
             contents=contents,
             config=types.GenerateContentConfig(
-                system_instruction=THINA_SYSTEM_INSTRUCTION,
+                system_instruction=get_thina_system_instruction(),
                 temperature=0.7,
                 tools=[types.Tool(google_search=types.GoogleSearch())],
             ),
@@ -524,7 +552,7 @@ async def _gerar_com_mcp(
                     model=settings.gemini_model,
                     contents=contents,
                     config=types.GenerateContentConfig(
-                        system_instruction=THINA_SYSTEM_INSTRUCTION,
+                        system_instruction=get_thina_system_instruction(),
                         temperature=0.7,
                         tools=[session],
                     ),

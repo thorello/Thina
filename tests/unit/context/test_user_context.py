@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from config import Settings
-from services import thina_context
+from thina.context import user as thina_context
+from thina.core.config import Settings
 
 
 def test_list_context_paths_ordem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

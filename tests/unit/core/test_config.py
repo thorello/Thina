@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from config import Settings
+from thina.core.config import Settings
 
 
 def test_strip_trailing_slash_on_urls() -> None:
@@ -82,9 +82,9 @@ def test_llm_api_key_configured_gemini() -> None:
 
 
 def test_ensure_audio_dir_cria_pasta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import config
+    import thina.core.config as config_mod
 
     audio_dir = tmp_path / "audio"
-    monkeypatch.setattr(config, "AUDIO_DIR", audio_dir)
+    monkeypatch.setattr(config_mod, "AUDIO_DIR", audio_dir)
     Settings().ensure_audio_dir()
     assert audio_dir.is_dir()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from services import conversation_store
+import thina.core.conversation as conversation_store
 
 
 @pytest.mark.asyncio

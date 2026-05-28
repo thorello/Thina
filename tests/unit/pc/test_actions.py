@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from config import Settings
-from services import pc_actions
+from thina.core.config import Settings
+from thina.pc import actions as pc_actions
 
 
 @pytest.mark.parametrize(

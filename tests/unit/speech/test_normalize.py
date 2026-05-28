@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from services.texto_voz import preparar_texto_para_voz
+from thina.speech.normalize import preparar_texto_para_voz
 
 
 @pytest.mark.parametrize(

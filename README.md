@@ -218,7 +218,7 @@ automation:
 Testar o servidor MCP isolado:
 
 ```powershell
-python -m services.gemini_mcp
+python -m thina.llm.gemini_mcp
 ```
 
 ## Testes automatizados
@@ -228,7 +228,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-A suíte em `tests/` cobre configuração, contexto do usuário, histórico de conversa, normalização TTS, detecção de apps no PC e o endpoint `/v1/conversar` (com mocks de LLM, Kokoro e Home Assistant). Não é necessário HA, Kokoro nem chaves reais para rodar os testes.
+A suíte em `tests/` (pastas `unit/` e `api/`, espelhando `thina/`) cobre configuração, contexto do usuário, histórico de conversa, normalização TTS, detecção de apps no PC e o endpoint `/v1/conversar` (com mocks de LLM, Kokoro e Home Assistant). Não é necessário HA, Kokoro nem chaves reais para rodar os testes.
 
 ## Testes manuais
 
@@ -244,16 +244,23 @@ curl -X POST http://localhost:8080/v1/conversar `
 
 ```
 thina-server/
-├── main.py
-├── config.py
-├── requirements.txt
-├── maps/areas.json
-├── data/audio/
-└── services/
-    ├── ha_client.py
-    ├── gemini_mcp.py
-    └── tts_kokoro.py
+├── AGENTS.md          # mapa para agentes de IA (Cursor, etc.)
+├── main.py            # entrada uvicorn (main:app)
+├── thina/             # pacote Python principal
+│   ├── api/           # FastAPI (/v1/conversar, /health)
+│   ├── core/          # config, historico de sessao
+│   ├── context/       # maps/*.md do usuario
+│   ├── speech/        # texto -> TTS
+│   ├── integrations/  # Home Assistant, Kokoro
+│   ├── llm/           # Gemini/DeepSeek + MCP
+│   └── pc/            # apps/sites/Spotify no Windows
+├── maps/              # areas, pc_apps, personalidade
+├── data/audio/        # WAV temporarios
+├── services/          # shims legados (compatibilidade)
+└── tests/             # unit/ + api/
 ```
+
+Detalhes para desenvolvimento assistido por IA: [AGENTS.md](AGENTS.md).
 
 ## Notas
 

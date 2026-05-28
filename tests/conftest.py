@@ -8,9 +8,9 @@ from typing import Iterator
 
 import pytest
 
-import services.conversation_store as conversation_store
-import services.pc_actions as pc_actions
-import services.thina_context as thina_context
+import thina.core.conversation as conversation_store
+import thina.context.user as thina_context
+import thina.pc.actions as pc_actions
 
 
 @pytest.fixture(autouse=True)

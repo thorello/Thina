@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from services.tts_kokoro import AudioResult
+from thina.integrations.kokoro import AudioResult
 
 
 def test_health(client: TestClient) -> None:
@@ -39,9 +39,9 @@ def test_conversar_area_desconhecida(client: TestClient) -> None:
     assert "area_id" in response.json()["detail"].lower()
 
 
-@patch("main.processar_mensagem", new_callable=AsyncMock)
-@patch("main.sintetizar", new_callable=AsyncMock)
-@patch("main.get_ha_client")
+@patch("thina.api.app.processar_mensagem", new_callable=AsyncMock)
+@patch("thina.api.app.sintetizar", new_callable=AsyncMock)
+@patch("thina.api.app.get_ha_client")
 def test_conversar_fluxo_completo(
     mock_get_ha: MagicMock,
     mock_sintetizar: AsyncMock,
@@ -81,7 +81,7 @@ def test_conversar_fluxo_completo(
     ha.play_media.assert_awaited_once()
 
 
-@patch("main.processar_mensagem", new_callable=AsyncMock)
+@patch("thina.api.app.processar_mensagem", new_callable=AsyncMock)
 def test_conversar_llm_indisponivel(
     mock_processar: AsyncMock, client: TestClient
 ) -> None:
@@ -96,14 +96,14 @@ def test_conversar_llm_indisponivel(
     assert "Chave API" in response.json()["detail"]
 
 
-@patch("main.processar_mensagem", new_callable=AsyncMock)
-@patch("main.sintetizar", new_callable=AsyncMock)
+@patch("thina.api.app.processar_mensagem", new_callable=AsyncMock)
+@patch("thina.api.app.sintetizar", new_callable=AsyncMock)
 def test_conversar_kokoro_falha(
     mock_sintetizar: AsyncMock,
     mock_processar: AsyncMock,
     client: TestClient,
 ) -> None:
-    from services.tts_kokoro import KokoroConnectionError
+    from thina.integrations.kokoro import KokoroConnectionError
 
     mock_processar.return_value = "ok"
     mock_sintetizar.side_effect = KokoroConnectionError("Kokoro offline.")
@@ -117,8 +117,8 @@ def test_conversar_kokoro_falha(
     assert "Kokoro" in response.json()["detail"]
 
 
-@patch("main.processar_mensagem", new_callable=AsyncMock)
-@patch("main.clear_session", new_callable=AsyncMock)
+@patch("thina.api.app.processar_mensagem", new_callable=AsyncMock)
+@patch("thina.api.app.clear_session", new_callable=AsyncMock)
 def test_conversar_nova_sessao_limpa_historico(
     mock_clear: AsyncMock,
     mock_processar: AsyncMock,
@@ -126,8 +126,8 @@ def test_conversar_nova_sessao_limpa_historico(
 ) -> None:
     mock_processar.return_value = "ok"
 
-    with patch("main.sintetizar", new_callable=AsyncMock) as mock_tts, patch(
-        "main.get_ha_client"
+    with patch("thina.api.app.sintetizar", new_callable=AsyncMock) as mock_tts, patch(
+        "thina.api.app.get_ha_client"
     ) as mock_ha:
         mock_tts.return_value = AudioResult(
             audio_id="x",

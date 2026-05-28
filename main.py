@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from config import AUDIO_DIR, get_settings, setup_logging
+from services.conversation_store import append_turn, clear_session, get_historico
 from services.gemini_mcp import processar_mensagem
 from services.ha_client import (
     HAAuthError,
@@ -47,7 +49,14 @@ class ConversarRequest(BaseModel):
 
     texto: str = Field(..., min_length=1, description="Texto transcrito pelo Whisper")
     area_id: str = Field(..., min_length=1, description="Identificador do comodo de origem")
-    session_id: str | None = Field(None, description="Reservado para historico multi-turno")
+    session_id: str | None = Field(
+        None,
+        description="Identificador da conversa; reutilize ate nova_sessao ou timeout",
+    )
+    nova_sessao: bool = Field(
+        False,
+        description="True ao dizer 'Tina' de novo: limpa historico e inicia conversa nova",
+    )
 
 
 class ConversarResponse(BaseModel):
@@ -55,6 +64,7 @@ class ConversarResponse(BaseModel):
     audio_url: str
     area_id: str
     media_player: str
+    session_id: str
 
 
 def _cleanup_old_audio() -> None:
@@ -185,16 +195,26 @@ async def conversar(body: ConversarRequest, request: Request) -> ConversarRespon
             f"Areas validas: {list(_areas_map.keys())}",
         ) from None
 
+    session_id = body.session_id or str(uuid.uuid4())
+    if body.nova_sessao:
+        await clear_session(session_id)
+    historico = await get_historico(session_id)
+
     logger.info(
-        "Conversa | area=%s | player=%s | texto=%s",
+        "Conversa | area=%s | player=%s | session=%s | turnos=%d | nova=%s | texto=%s",
         body.area_id,
         media_player,
+        session_id[:8],
+        len(historico) // 2,
+        body.nova_sessao,
         body.texto[:80] + ("..." if len(body.texto) > 80 else ""),
     )
 
     # --- Etapa 2: Gemini + MCP ---
     try:
-        resposta_texto = await processar_mensagem(body.texto, body.area_id)
+        resposta_texto = await processar_mensagem(
+            body.texto, body.area_id, historico=historico or None
+        )
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except TimeoutError as exc:
@@ -227,6 +247,7 @@ async def conversar(body: ConversarRequest, request: Request) -> ConversarRespon
     except HAError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    await append_turn(session_id, body.texto, resposta_texto)
     _cleanup_old_audio()
 
     return ConversarResponse(
@@ -234,6 +255,7 @@ async def conversar(body: ConversarRequest, request: Request) -> ConversarRespon
         audio_url=audio.public_url,
         area_id=body.area_id,
         media_player=media_player,
+        session_id=session_id,
     )
 
 

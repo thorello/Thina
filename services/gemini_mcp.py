@@ -393,6 +393,8 @@ def _build_contents(
     if historico:
         for turn in historico:
             role = turn.get("role", "user")
+            if role == "assistant":
+                role = "model"
             content = turn.get("content", "")
             contents.append(
                 types.Content(

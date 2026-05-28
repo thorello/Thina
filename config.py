@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     audio_retention_hours: int = 24
     log_level: str = "INFO"
 
+    # Conversa multi-turno (session_id no /v1/conversar)
+    conversation_max_turns: int = 10
+    conversation_ttl_seconds: int = 600
+
     @field_validator("home_assistant_url", "kokoro_server_url", "thina_public_url")
     @classmethod
     def strip_trailing_slash(cls, v: str) -> str:

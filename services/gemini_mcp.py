@@ -32,17 +32,26 @@ from services.ha_client import (
     HANotFoundError,
     get_ha_client,
 )
+from services.texto_voz import preparar_texto_para_voz
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Personalidade da Thina (system instruction para o Gemini)
 # ---------------------------------------------------------------------------
+_VOZ_FORMATO = """
+Formato (a resposta sera lida em voz alta por TTS):
+- Apenas texto corrido em portugues, sem markdown: sem asteriscos, underscores, backticks ou listas com marcadores.
+- Sem emojis, emoticons nem simbolos decorativos.
+- Nao descreva formatacao; fale como numa conversa normal.
+"""
+
 THINA_CHAT_INSTRUCTION = """Voce e a Thina, assistente de voz residencial inteligente em portugues do Brasil.
 
 Personalidade:
 - Cordial, objetiva e natural, como uma assistente de casa de confianca.
 - Respostas curtas e faladas (ideal para serem lidas em voz alta), em uma ou duas frases.
+""" + _VOZ_FORMATO + """
 
 Conhecimento geral (sem ferramentas neste modo):
 - Responda perguntas de geografia, ciencia, receitas, noticias e clima com seu conhecimento.
@@ -64,6 +73,7 @@ Personalidade:
 - Respostas curtas e faladas (ideal para serem lidas em voz alta).
 - Confirme antes de acoes que afetem seguranca (portas, alarmes, aquecedores a gas).
 - Nunca invente estados de dispositivos: use sempre as ferramentas MCP para ler sensores ou controlar a casa.
+""" + _VOZ_FORMATO + """
 
 Conhecimento e pesquisa:
 - Para perguntas gerais (geografia, ciencia, receitas, noticias, clima na cidade, etc.), use a ferramenta Google Search e responda com base nos resultados.
@@ -539,13 +549,15 @@ async def processar_mensagem(
 
     fast = await try_spotify_fastpath(texto)
     if fast is not None:
-        logger.info("Resposta Thina fast-path Spotify (%d caracteres)", len(fast))
-        return fast
+        out = preparar_texto_para_voz(fast)
+        logger.info("Resposta Thina fast-path Spotify (%d caracteres)", len(out))
+        return out
 
     fast = await try_pc_fastpath(texto)
     if fast is not None:
-        logger.info("Resposta Thina fast-path PC (%d caracteres)", len(fast))
-        return fast
+        out = preparar_texto_para_voz(fast)
+        logger.info("Resposta Thina fast-path PC (%d caracteres)", len(out))
+        return out
 
     settings = get_settings()
 
@@ -592,6 +604,7 @@ async def processar_mensagem(
     except (HAConnectionError, HAAuthError) as exc:
         raise RuntimeError(f"Home Assistant inacessivel durante MCP: {exc}") from exc
 
+    resposta = preparar_texto_para_voz(resposta)
     logger.info("Resposta Thina (%d caracteres)", len(resposta))
     return resposta
 

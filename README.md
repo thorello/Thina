@@ -109,26 +109,32 @@ O `area_id` enviado pelo HA deve corresponder a uma chave deste ficheiro.
 
 ## Executar
 
-### Stack completa (Kokoro + Thina)
+### Stack completa (Home Assistant + Kokoro + Thina)
 
-Na raiz do projeto:
+Na raiz do projeto (Home Assistant via **Docker no WSL**):
 
 ```powershell
-.\start.ps1          # sobe Kokoro (:8000) e Thina (THINA_PORT no .env)
-.\stop.ps1           # para ambos
+.\start.ps1          # HA (:8123) + Kokoro (:8000) + Thina (THINA_PORT no .env)
+.\stop.ps1           # para os tres
+.\restart.ps1        # para e sobe de novo
 .\scripts\status-services.ps1
 ```
+
+Requisitos: WSL com `docker` funcional (`wsl docker version`). Config do HA em `data/homeassistant/`.
+Na primeira subida abra http://localhost:8123 e crie o utilizador; depois gere o token long-lived para `HOME_ASSISTANT_TOKEN` no `.env`.
+Para desativar o HA nos scripts: `HOME_ASSISTANT_MANAGED=false` (HA noutro host).
 
 Ou:
 
 ```powershell
 .\scripts\start-services.ps1
 .\scripts\stop-services.ps1
+.\scripts\restart-services.ps1
 ```
 
 Logs dos processos: `data/run/kokoro.*.log`, `data/run/thina.*.log`.
 
-O **Home Assistant** nao e iniciado por estes scripts (corre no Docker ou noutro host).
+O **Home Assistant** e iniciado por `start.ps1` via `wsl docker compose` em `scripts/ha/` (desative com `HOME_ASSISTANT_MANAGED=false` se o HA correr noutro sítio).
 
 ### Apenas o servidor Thina
 

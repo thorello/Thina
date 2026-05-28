@@ -7,6 +7,7 @@ Assistente de voz residencial: **Home Assistant (STT)** → **este servidor (LLM
 | Tarefa | Arquivo / pasta |
 |--------|-----------------|
 | Endpoint principal `POST /v1/conversar` | `thina/api/app.py` |
+| Painel WebGL (UI) | `ui/` → build → `/ui/` no FastAPI |
 | Variáveis de ambiente e caminhos | `thina/core/config.py` (`.env` na raiz) |
 | Fluxo LLM + ferramentas MCP | `thina/llm/gemini_mcp.py` (`processar_mensagem`) |
 | DeepSeek (provider alternativo) | `thina/llm/deepseek.py` |

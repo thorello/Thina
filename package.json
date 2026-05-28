@@ -1,0 +1,10 @@
+{
+  "name": "thina-server",
+  "private": true,
+  "description": "Scripts npm na raiz — UI em ui/",
+  "scripts": {
+    "dev": "npm run dev --prefix ui",
+    "build:ui": "npm run build --prefix ui",
+    "install:ui": "npm install --prefix ui"
+  }
+}

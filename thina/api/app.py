@@ -17,10 +17,12 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from thina.api.schemas import ConversarRequest, ConversarResponse
-from thina.core.config import AUDIO_DIR, get_settings, setup_logging
+from thina.core.config import AUDIO_DIR, BASE_DIR, get_settings, setup_logging
 from thina.core.conversation import append_turn, clear_session, get_historico
 from thina.integrations.homeassistant import (
     HAAuthError,
@@ -105,9 +107,40 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+UI_DIST = BASE_DIR / "ui" / "dist"
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/v1/areas")
+async def list_areas() -> dict[str, list[str]]:
+    """Lista area_id validos (maps/areas.json) para a interface web."""
+    return {"areas": sorted(_areas_map.keys())}
+
+
+@app.get("/")
+async def root():
+    """Redireciona para o painel web quando o build da UI existir."""
+    if UI_DIST.is_dir() and (UI_DIST / "index.html").is_file():
+        return RedirectResponse(url="/ui/", status_code=302)
+    return {
+        "service": "thina",
+        "docs": "/docs",
+        "ui": "Execute npm run build em ui/ e reinicie o servidor.",
+    }
+
 
 @app.get("/health")
-async def health() -> dict[str, str]:
+async def health() -> dict[str, str | list[str] | bool]:
     settings = get_settings()
     llm_model = (
         settings.deepseek_model
@@ -120,6 +153,16 @@ async def health() -> dict[str, str]:
         voice_label = (
             f"{settings.kokoro_voice}+{settings.kokoro_mix_amount:.0%}_{mix_voice}"
         )
+
+    ha_ok = False
+    if settings.home_assistant_token:
+        try:
+            ha = get_ha_client()
+            await ha.get_states()
+            ha_ok = True
+        except Exception as exc:
+            logger.debug("Health: HA indisponivel: %s", exc)
+
     return {
         "status": "ok",
         "service": "thina",
@@ -128,6 +171,9 @@ async def health() -> dict[str, str]:
         "kokoro_voice": voice_label,
         "kokoro_speed": str(settings.kokoro_speed),
         "kokoro_sentiment": settings.kokoro_sentiment,
+        "areas": sorted(_areas_map.keys()),
+        "ha_ok": ha_ok,
+        "ha_url": settings.home_assistant_url,
     }
 
 
@@ -208,15 +254,22 @@ async def conversar(body: ConversarRequest, request: Request) -> ConversarRespon
     except KokoroError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    ha = get_ha_client()
-    try:
-        await ha.play_media(media_player, audio.public_url)
-    except HAConnectionError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except HAAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except HAError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if body.reproduzir_ha:
+        ha = get_ha_client()
+        try:
+            await ha.play_media(media_player, audio.public_url)
+        except HAConnectionError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except HAAuthError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except HAError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    else:
+        logger.info(
+            "reproduzir_ha=false — audio em %s (sem play_media no %s)",
+            audio.public_url,
+            media_player,
+        )
 
     await append_turn(session_id, body.texto, resposta_texto)
     _cleanup_old_audio()
@@ -227,6 +280,14 @@ async def conversar(body: ConversarRequest, request: Request) -> ConversarRespon
         area_id=body.area_id,
         media_player=media_player,
         session_id=session_id,
+    )
+
+
+if UI_DIST.is_dir() and (UI_DIST / "index.html").is_file():
+    app.mount(
+        "/ui",
+        StaticFiles(directory=str(UI_DIST), html=True),
+        name="thina-ui",
     )
 
 

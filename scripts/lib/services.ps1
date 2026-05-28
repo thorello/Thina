@@ -1,5 +1,5 @@
-# Funcoes partilhadas para subir/parar a stack Thina (Kokoro + thina-server).
-# Uso: . "$PSScriptRoot\lib\services.ps1"
+# Funcoes partilhadas para subir/parar a stack Thina (Home Assistant + Kokoro + thina-server).
+# Docker: via WSL (wsl docker / wsl docker compose). Uso: . "$PSScriptRoot\lib\services.ps1"
 
 $ErrorActionPreference = "Stop"
 
@@ -64,14 +64,196 @@ function Get-StackConfig {
     $thinaVenv = Join-Path $root ".venv\Scripts\python.exe"
     $kokoroVenv = Join-Path $kokoroDir ".venv\Scripts\python.exe"
 
+    $haPort = 8123
+    $haUrl = $env["HOME_ASSISTANT_URL"]
+    if ($haUrl -match ':(\d+)\s*$') { $haPort = [int]$Matches[1] }
+
+    $haManaged = $true
+    if ($env["HOME_ASSISTANT_MANAGED"] -eq "false") { $haManaged = $false }
+
     return [PSCustomObject]@{
-        Root       = $root
-        RunDir     = Get-RunDir $root
-        KokoroDir  = $kokoroDir
-        ThinaPort  = $thinaPort
-        KokoroPort = $kokoroPort
-        ThinaPy    = if (Test-Path $thinaVenv) { $thinaVenv } else { "python" }
-        KokoroPy   = if (Test-Path $kokoroVenv) { $kokoroVenv } else { "python" }
+        Root          = $root
+        RunDir        = Get-RunDir $root
+        KokoroDir     = $kokoroDir
+        ThinaPort     = $thinaPort
+        KokoroPort    = $kokoroPort
+        HaPort        = $haPort
+        HaManaged     = $haManaged
+        HaComposeDir  = Join-Path $root "scripts\ha"
+        HaContainer   = "thina-homeassistant"
+        WslDistro     = $env["WSL_DISTRO"]
+        ThinaPy       = if (Test-Path $thinaVenv) { $thinaVenv } else { "python" }
+        KokoroPy      = if (Test-Path $kokoroVenv) { $kokoroVenv } else { "python" }
+    }
+}
+
+function Get-WslExeArgs {
+    param([object]$Cfg)
+    $args = @()
+    if ($Cfg.WslDistro) {
+        $args += "-d", $Cfg.WslDistro
+    }
+    return $args
+}
+
+function ConvertTo-WslPath {
+    param([string]$WindowsPath)
+    $resolved = (Resolve-Path $WindowsPath -ErrorAction Stop).Path
+    # Barras normais: PowerShell apaga '\' ao passar argumentos ao wsl.exe
+    $winPath = $resolved.Replace("\", "/")
+    $wslBase = Get-WslExeArgs (Get-StackConfig)
+    $out = & wsl @wslBase wslpath -a $winPath 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "wslpath falhou para '$resolved': $out"
+    }
+    return ($out | Out-String).Trim()
+}
+
+function Invoke-WslCommand {
+    param(
+        [object]$Cfg,
+        [string[]]$Command
+    )
+    $wslBase = Get-WslExeArgs $Cfg
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $out = & wsl @wslBase @Command 2>&1 | ForEach-Object { "$_" }
+    $exit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+    if ($exit -ne 0) {
+        throw "Comando WSL falhou (exit $exit): $($Command -join ' ') | $out"
+    }
+    return $out
+}
+
+function Invoke-WslDocker {
+    param(
+        [object]$Cfg,
+        [string[]]$DockerArgs
+    )
+    $dockerCmd = @("docker") + @($DockerArgs)
+    return Invoke-WslCommand -Cfg $Cfg -Command $dockerCmd
+}
+
+function Test-WslDocker {
+    param([object]$Cfg)
+    try {
+        Invoke-WslDocker -Cfg $Cfg -DockerArgs @("version", "--format", "{{.Server.Version}}") | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Test-HomeAssistantContainerRunning {
+    param([object]$Cfg)
+    try {
+        foreach ($name in @($Cfg.HaContainer, "homeassistant")) {
+            $out = Invoke-WslDocker -Cfg $Cfg -DockerArgs @(
+                "ps", "--filter", "name=^/${name}$", "--filter", "status=running", "-q"
+            )
+            if (($out | Out-String).Trim()) { return $true }
+        }
+        return $false
+    } catch {
+        return $false
+    }
+}
+
+function Test-HomeAssistantHttp {
+    param([object]$Cfg)
+    return Wait-HttpOk "http://127.0.0.1:$($Cfg.HaPort)/" 5 1
+}
+
+function Start-HomeAssistant {
+    param([object]$Cfg)
+    if (-not $Cfg.HaManaged) {
+        Write-Host "  [homeassistant] HOME_ASSISTANT_MANAGED=false - ignorado" -ForegroundColor DarkGray
+        return
+    }
+    if (-not (Test-WslDocker $Cfg)) {
+        throw "Docker nao encontrado no WSL. Instale no WSL ou defina WSL_DISTRO no .env."
+    }
+
+    $composeFile = Join-Path $Cfg.HaComposeDir "docker-compose.yml"
+    if (-not (Test-Path $composeFile)) {
+        throw "Compose nao encontrado: $composeFile"
+    }
+
+    $haConfig = Join-Path $Cfg.Root "data\homeassistant"
+    if (-not (Test-Path $haConfig)) {
+        New-Item -ItemType Directory -Path $haConfig -Force | Out-Null
+    }
+
+    $haUrl = "http://127.0.0.1:$($Cfg.HaPort)/"
+
+    if (Test-HomeAssistantHttp $Cfg) {
+        Write-Host "  [homeassistant] ja responde em $haUrl" -ForegroundColor Green
+        return
+    }
+
+    if (Test-HomeAssistantContainerRunning $Cfg) {
+        Write-Host "  [homeassistant] container em execucao, aguardando HTTP ..."
+    } else {
+        $wslHaDir = ConvertTo-WslPath $Cfg.HaComposeDir
+        Write-Host "  [homeassistant] docker compose up (WSL) ..."
+        try {
+            Invoke-WslCommand -Cfg $Cfg -Command @(
+                "bash", "-lc",
+                "export HA_HOST_PORT=$($Cfg.HaPort); cd '$wslHaDir'; docker compose up -d"
+            ) | Out-Null
+            Write-Host "  [homeassistant] container iniciado" -ForegroundColor Green
+        } catch {
+            if (Test-HomeAssistantHttp $Cfg) {
+                Write-Host "  [homeassistant] porta $($Cfg.HaPort) em uso por outro HA (OK)" -ForegroundColor Yellow
+            } else {
+                Invoke-WslDocker -Cfg $Cfg -DockerArgs @("rm", "-f", $Cfg.HaContainer) 2>$null | Out-Null
+                throw
+            }
+        }
+    }
+
+    Write-Host "  Aguardando $haUrl (primeira subida pode demorar varios minutos) ..."
+    if (-not (Wait-HttpOk $haUrl 300)) {
+        Write-Host "  AVISO: HA ainda nao respondeu. Veja: wsl docker logs homeassistant" -ForegroundColor Yellow
+    } else {
+        Write-Host "  Home Assistant OK" -ForegroundColor Green
+    }
+}
+
+function Stop-HomeAssistant {
+    param([object]$Cfg)
+    if (-not $Cfg.HaManaged) {
+        Write-Host "  [homeassistant] HOME_ASSISTANT_MANAGED=false - ignorado" -ForegroundColor DarkGray
+        return
+    }
+    if (-not (Test-WslDocker $Cfg)) {
+        Write-Host "  [homeassistant] Docker/WSL indisponivel" -ForegroundColor DarkGray
+        return
+    }
+
+    $stopped = $false
+    try {
+        $managed = Invoke-WslDocker -Cfg $Cfg -DockerArgs @(
+            "ps", "-a", "--filter", "name=^/$($Cfg.HaContainer)$", "-q"
+        )
+        if (($managed | Out-String).Trim()) {
+            $wslHaDir = ConvertTo-WslPath $Cfg.HaComposeDir
+            Invoke-WslCommand -Cfg $Cfg -Command @(
+                "bash", "-lc",
+                "cd '$wslHaDir'; docker compose down"
+            ) | Out-Null
+            $stopped = $true
+        }
+    } catch {
+        Invoke-WslDocker -Cfg $Cfg -DockerArgs @("rm", "-f", $Cfg.HaContainer) 2>$null | Out-Null
+        $stopped = $true
+    }
+
+    if ($stopped) {
+        Write-Host "  [homeassistant] container $($Cfg.HaContainer) parado" -ForegroundColor Green
+    } else {
+        Write-Host "  [homeassistant] $($Cfg.HaContainer) ausente (container 'homeassistant' externo nao e parado)" -ForegroundColor DarkGray
     }
 }
 
@@ -193,7 +375,12 @@ function Start-ThinaStack {
     Write-Host "`n=== Subindo servicos Thina ===" -ForegroundColor Cyan
     Write-Host "Raiz: $($cfg.Root)"
     Write-Host "Kokoro: $($cfg.KokoroDir) :$($cfg.KokoroPort)"
-    Write-Host "Thina:  :$($cfg.ThinaPort)`n"
+    Write-Host "Thina:  :$($cfg.ThinaPort)"
+    if ($cfg.HaManaged) {
+        Write-Host "HA:     http://127.0.0.1:$($cfg.HaPort) (Docker no WSL)`n"
+    } else {
+        Write-Host "HA:     externo (HOME_ASSISTANT_MANAGED=false)`n"
+    }
 
     if (-not (Test-Path $cfg.KokoroDir)) {
         throw "Pasta Kokoro nao encontrada: $($cfg.KokoroDir). Defina KOKORO_DIR no .env"
@@ -202,8 +389,14 @@ function Start-ThinaStack {
         throw "src\app.py nao encontrado em $($cfg.KokoroDir)"
     }
 
-    # 1) Kokoro (TTS)
-    Write-Host "[1/2] Kokoro TTS"
+    # 1) Home Assistant (Docker/WSL)
+    if ($cfg.HaManaged) {
+        Write-Host "[1/3] Home Assistant"
+        Start-HomeAssistant $cfg
+    }
+
+    # 2) Kokoro (TTS)
+    Write-Host $(if ($cfg.HaManaged) { "`n[2/3] Kokoro TTS" } else { "[1/2] Kokoro TTS" })
     Start-ManagedProcess `
         -Name "kokoro" `
         -WorkingDirectory $cfg.KokoroDir `
@@ -219,8 +412,8 @@ function Start-ThinaStack {
         Write-Host "  Kokoro OK" -ForegroundColor Green
     }
 
-    # 2) Thina
-    Write-Host "`n[2/2] thina-server"
+    # 3) Thina
+    Write-Host $(if ($cfg.HaManaged) { "`n[3/3] thina-server" } else { "`n[2/2] thina-server" })
     Start-ManagedProcess `
         -Name "thina" `
         -WorkingDirectory $cfg.Root `
@@ -237,12 +430,14 @@ function Start-ThinaStack {
     }
 
     Write-Host "`n=== Stack pronta ===" -ForegroundColor Cyan
+    if ($cfg.HaManaged) {
+        Write-Host "  HA:      http://127.0.0.1:$($cfg.HaPort) (onboarding na 1a vez)"
+    }
     Write-Host "  Kokoro:  http://127.0.0.1:$($cfg.KokoroPort)"
     Write-Host "  Thina:   http://127.0.0.1:$($cfg.ThinaPort)/health"
     Write-Host "  Docs:    http://127.0.0.1:$($cfg.ThinaPort)/docs"
     Write-Host "  Teste:   .\.venv\Scripts\python scripts\test_app.py"
     Write-Host "  Microfone: .\test-mic.ps1`n"
-    Write-Host "Home Assistant nao e gerido por estes scripts (corre a parte).`n"
 }
 
 function Stop-ThinaStack {
@@ -250,34 +445,66 @@ function Stop-ThinaStack {
     Write-Host "`n=== Parando servicos Thina ===" -ForegroundColor Cyan
 
     # Thina primeiro (depende do Kokoro)
-    Write-Host "[1/2] thina-server"
+    $step = 1
+    $total = if ($cfg.HaManaged) { 3 } else { 2 }
+    Write-Host "[$step/$total] thina-server"
     Stop-ManagedProcess -Name "thina" -Port $cfg.ThinaPort -RunDir $cfg.RunDir
 
-    Write-Host "`n[2/2] Kokoro TTS"
+    $step++
+    Write-Host "`n[$step/$total] Kokoro TTS"
     Stop-ManagedProcess -Name "kokoro" -Port $cfg.KokoroPort -RunDir $cfg.RunDir
 
-    Write-Host "`n=== Servicos locais parados ===`n" -ForegroundColor Cyan
+    if ($cfg.HaManaged) {
+        $step++
+        Write-Host "`n[$step/$total] Home Assistant"
+        Stop-HomeAssistant $cfg
+    }
+
+    Write-Host "`n=== Stack parada ===`n" -ForegroundColor Cyan
 }
 
 function Show-ThinaStackStatus {
     $cfg = Get-StackConfig
     Write-Host "`n=== Estado da stack ===" -ForegroundColor Cyan
-    foreach ($svc in @(
-            @{ Name = "kokoro"; Port = $cfg.KokoroPort; Health = "http://127.0.0.1:$($cfg.KokoroPort)/voices" },
-            @{ Name = "thina"; Port = $cfg.ThinaPort; Health = "http://127.0.0.1:$($cfg.ThinaPort)/health" }
-        )) {
-        $pidFile = Get-PidFilePath $svc.Name $cfg.RunDir
-        $filePid = if (Test-Path $pidFile) { Get-Content $pidFile -Raw } else { "-" }
-        $portPid = Get-ListenerPid $svc.Port
+    $services = @()
+    if ($cfg.HaManaged) {
+        $services += @{
+            Name   = "homeassistant"
+            Port   = $cfg.HaPort
+            Health = "http://127.0.0.1:$($cfg.HaPort)/"
+            Docker = $true
+        }
+    }
+    $services += @(
+        @{ Name = "kokoro"; Port = $cfg.KokoroPort; Health = "http://127.0.0.1:$($cfg.KokoroPort)/voices"; Docker = $false },
+        @{ Name = "thina"; Port = $cfg.ThinaPort; Health = "http://127.0.0.1:$($cfg.ThinaPort)/health"; Docker = $false }
+    )
+
+    foreach ($svc in $services) {
         $httpOk = $false
         try {
             $r = Invoke-WebRequest -Uri $svc.Health -UseBasicParsing -TimeoutSec 3
-            $httpOk = $r.StatusCode -eq 200
+            $httpOk = $r.StatusCode -ge 200 -and $r.StatusCode -lt 400
         } catch { }
-        $status = if ($httpOk) { "UP" } else { "DOWN" }
-        $color = if ($httpOk) { "Green" } else { "Red" }
-        Write-Host ("  {0,-8} porta {1,-5} PID(ficheiro)={2,-8} PID(porta)={3,-8} HTTP={4}" -f `
-                $svc.Name, $svc.Port, $filePid, $(if ($portPid) { $portPid } else { "-" }), $status) -ForegroundColor $color
+
+        if ($svc.Docker) {
+            $dockerUp = $false
+            if (Test-WslDocker $cfg) {
+                $dockerUp = Test-HomeAssistantContainerRunning $cfg
+            }
+            $status = if ($httpOk) { "UP" } elseif ($dockerUp) { "STARTING" } else { "DOWN" }
+            $color = if ($httpOk) { "Green" } elseif ($dockerUp) { "Yellow" } else { "Red" }
+            Write-Host ("  {0,-14} porta {1,-5} container={2,-5} HTTP={3}" -f `
+                    $svc.Name, $svc.Port, $(if ($dockerUp) { "sim" } else { "nao" }), $status) -ForegroundColor $color
+        } else {
+            $pidFile = Get-PidFilePath $svc.Name $cfg.RunDir
+            $filePid = if (Test-Path $pidFile) { Get-Content $pidFile -Raw } else { "-" }
+            $portPid = Get-ListenerPid $svc.Port
+            $status = if ($httpOk) { "UP" } else { "DOWN" }
+            $color = if ($httpOk) { "Green" } else { "Red" }
+            Write-Host ("  {0,-14} porta {1,-5} PID(ficheiro)={2,-8} PID(porta)={3,-8} HTTP={4}" -f `
+                    $svc.Name, $svc.Port, $filePid, $(if ($portPid) { $portPid } else { "-" }), $status) -ForegroundColor $color
+        }
     }
     Write-Host ""
 }

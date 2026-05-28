@@ -1,0 +1,13 @@
+# Home Assistant local para desenvolvimento com thina-server.
+# Config persistente: data/homeassistant (gitignore)
+services:
+  homeassistant:
+    container_name: thina-homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - ../../data/homeassistant:/config
+    environment:
+      - TZ=America/Sao_Paulo
+    ports:
+      - "${HA_HOST_PORT:-8123}:8123"
+    restart: unless-stopped

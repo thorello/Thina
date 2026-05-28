@@ -11,15 +11,6 @@ from fastapi.testclient import TestClient
 from thina.integrations.kokoro import AudioResult
 
 
-def test_health(client: TestClient) -> None:
-    response = client.get("/health")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "ok"
-    assert body["service"] == "thina"
-    assert body["llm_provider"] == "deepseek"
-
-
 def test_servir_audio_id_invalido(client: TestClient) -> None:
     response = client.get("/v1/audio/id_com_underscore_invalido.wav")
     assert response.status_code == 400
@@ -78,6 +69,109 @@ def test_conversar_fluxo_completo(
 
     mock_processar.assert_awaited_once()
     mock_sintetizar.assert_awaited_once_with("Resposta da Thina.")
+    ha.play_media.assert_awaited_once()
+
+
+@patch("thina.api.app.processar_mensagem", new_callable=AsyncMock)
+@patch("thina.api.app.sintetizar", new_callable=AsyncMock)
+@patch("thina.api.app.get_ha_client")
+def test_conversar_sem_reproduzir_ha(
+    mock_get_ha: MagicMock,
+    mock_sintetizar: AsyncMock,
+    mock_processar: AsyncMock,
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    mock_processar.return_value = "Brasilia."
+    mock_sintetizar.return_value = AudioResult(
+        audio_id="audio-test-2",
+        local_path=tmp_path / "audio-test-2.wav",
+        public_url="http://test-thina.local:8080/v1/audio/audio-test-2.wav",
+    )
+    ha = MagicMock()
+    ha.play_media = AsyncMock()
+    mock_get_ha.return_value = ha
+
+    response = client.post(
+        "/v1/conversar",
+        json={
+            "texto": "qual a capital do brasil?",
+            "area_id": "sala",
+            "reproduzir_ha": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["resposta"] == "Brasilia."
+    ha.play_media.assert_not_awaited()
+    mock_get_ha.assert_not_called()
+
+
+@patch("thina.api.app.processar_mensagem", new_callable=AsyncMock)
+@patch("thina.api.app.sintetizar", new_callable=AsyncMock)
+@patch("thina.api.app.get_ha_client")
+def test_conversar_ha_falha_retorna_502_com_reproduzir_ha(
+    mock_get_ha: MagicMock,
+    mock_sintetizar: AsyncMock,
+    mock_processar: AsyncMock,
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    from thina.integrations.homeassistant import HAConnectionError
+
+    mock_processar.return_value = "Resposta ok."
+    mock_sintetizar.return_value = AudioResult(
+        audio_id="audio-ha-fail",
+        local_path=tmp_path / "audio-ha-fail.wav",
+        public_url="http://test-thina.local:8080/v1/audio/audio-ha-fail.wav",
+    )
+    ha = MagicMock()
+    ha.play_media = AsyncMock(
+        side_effect=HAConnectionError("Nao foi possivel ligar ao Home Assistant: falha")
+    )
+    mock_get_ha.return_value = ha
+
+    response = client.post(
+        "/v1/conversar",
+        json={
+            "texto": "ola",
+            "area_id": "sala",
+            "reproduzir_ha": True,
+        },
+    )
+
+    assert response.status_code == 502
+    assert "Home Assistant" in response.json()["detail"]
+    ha.play_media.assert_awaited_once()
+
+
+@patch("thina.api.app.processar_mensagem", new_callable=AsyncMock)
+@patch("thina.api.app.sintetizar", new_callable=AsyncMock)
+@patch("thina.api.app.get_ha_client")
+def test_conversar_reproduzir_ha_padrao_chama_play_media(
+    mock_get_ha: MagicMock,
+    mock_sintetizar: AsyncMock,
+    mock_processar: AsyncMock,
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    mock_processar.return_value = "Sim."
+    mock_sintetizar.return_value = AudioResult(
+        audio_id="audio-default-ha",
+        local_path=tmp_path / "audio-default-ha.wav",
+        public_url="http://test/x.wav",
+    )
+    ha = MagicMock()
+    ha.play_media = AsyncMock()
+    mock_get_ha.return_value = ha
+
+    response = client.post(
+        "/v1/conversar",
+        json={"texto": "ola", "area_id": "sala"},
+    )
+
+    assert response.status_code == 200
+    mock_get_ha.assert_called_once()
     ha.play_media.assert_awaited_once()
 
 

@@ -18,6 +18,10 @@ class ConversarRequest(BaseModel):
         False,
         description="True ao dizer 'Tina' de novo: limpa historico e inicia conversa nova",
     )
+    reproduzir_ha: bool = Field(
+        True,
+        description="False no painel web: devolve texto/audio sem media_player.play_media no HA",
+    )
 
 
 class ConversarResponse(BaseModel):

@@ -30,6 +30,8 @@ data/audio/*
 !data/audio/.gitkeep
 data/run/*
 !data/run/.gitkeep
+data/homeassistant/*
+!data/homeassistant/.gitkeep
 data/*.log
 *.wav
 *.mp3
@@ -39,6 +41,10 @@ data/*.log
 # Cache de modelos (Whisper / Hugging Face, se baixados no projeto)
 .cache/
 models/
+
+# Interface WebGL (Vite)
+ui/node_modules/
+ui/dist/
 
 # IDE e SO
 .vscode/

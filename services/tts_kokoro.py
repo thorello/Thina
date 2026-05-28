@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 
 from config import AUDIO_DIR, get_settings
+from services.texto_voz import preparar_texto_para_voz
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,10 @@ async def sintetizar(texto: str) -> AudioResult:
     """
     settings = get_settings()
     settings.ensure_audio_dir()
+
+    texto = preparar_texto_para_voz(texto)
+    if not texto:
+        raise KokoroResponseError("Texto vazio apos preparacao para voz.")
 
     audio_id = uuid.uuid4().hex
     local_path = AUDIO_DIR / f"{audio_id}.wav"

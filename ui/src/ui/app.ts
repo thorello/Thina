@@ -10,6 +10,11 @@ import {
 } from "../api/client";
 import { animateSpeakingEnergy } from "../gl/orb";
 import { playWakeFeedback, unlockWakeFeedback } from "../speech/feedback";
+import {
+  playResponseAudio,
+  stopResponseAudio,
+  unlockResponseAudio,
+} from "../speech/response-audio";
 import { micLog, subscribeMicLogUi, type MicLogEntry } from "../speech/log";
 import {
   isSpeechRecognitionSupported,
@@ -60,6 +65,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     onWake: () => {
       pendingWake = true;
       micWakeUnlocked = true;
+      unlockResponseAudio();
       showWakeFeedback();
     },
     onCommand: (text, novaSessao) => {
@@ -345,6 +351,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     }
     if (micActive) return true;
     unlockWakeFeedback();
+    unlockResponseAudio();
     micLog.clearHistory();
     micLogViewEl.textContent = "";
     resetVoiceInputPreview();
@@ -465,6 +472,8 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    unlockResponseAudio();
+
     setBusy(true);
     setState(novaSessao ? "listening" : getState() === "idle" ? "listening" : getState());
     pushChat("user", trimmed);
@@ -483,22 +492,27 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
       if (settings.autoPlayAudio && result.audio_url) {
         stopSpeakAnim?.();
         stopSpeakAnim = animateSpeakingEnergy((e) => setEnergy(e), 8000);
-        const audio = new Audio(resolveAudioUrl(settings, result.audio_url));
-        audio.addEventListener("ended", () => {
+        const src = resolveAudioUrl(settings, result.audio_url);
+        const finishSpeaking = () => {
           stopSpeakAnim?.();
           setEnergy(0);
           setState("idle");
-        });
-        audio.addEventListener("error", () => {
-          setEnergy(0);
-          setState("idle");
-        });
-        void audio.play().catch(() => {
-          pushChat("system", "Áudio gerado; reprodução no ReSpeaker via HA.");
-          setTimeout(() => setState("idle"), 1500);
-        });
+        };
+        try {
+          await playResponseAudio(src);
+          finishSpeaking();
+        } catch {
+          pushChat(
+            "system",
+            "Não foi possível reproduzir o áudio no navegador. " +
+              "Confira se o servidor Thina está acessível e se «Reproduzir áudio» está ligado.",
+          );
+          finishSpeaking();
+        }
+      } else if (!settings.autoPlayAudio) {
+        pushChat("system", "Reprodução no navegador desligada nas configurações.");
+        setTimeout(() => setState("idle"), 1200);
       } else {
-        pushChat("system", `Áudio no ${result.media_player}`);
         setTimeout(() => setState("idle"), 1200);
       }
     } catch (e) {
@@ -544,6 +558,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
 
   chatForm.addEventListener("submit", (ev) => {
     ev.preventDefault();
+    unlockResponseAudio();
     void sendMessage(chatInput.value, pendingWake);
   });
 
@@ -576,6 +591,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   return {
     emergencyStop: () => {
       if (micActive) stopMic();
+      stopResponseAudio();
       setMicStatus("Parado (Esc / emergência)");
       micLog.warn("Parada de emergência");
     },

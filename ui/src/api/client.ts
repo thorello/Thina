@@ -161,10 +161,31 @@ export async function conversar(
   return res.json() as Promise<ConversarResult>;
 }
 
+const AUDIO_PATH_RE = /^\/v1\/audio\/[^/]+\.wav$/i;
+
+/** Usa o mesmo host/proxy da API; ignora THINA_PUBLIC_URL (só para o Home Assistant). */
 export function resolveAudioUrl(settings: UiSettings, audioUrl: string): string {
+  const path = extractAudioPath(audioUrl);
+  if (path) return apiUrl(settings, path);
+
   if (audioUrl.startsWith("http")) return audioUrl;
   const segment = audioUrl.startsWith("/") ? audioUrl : `/${audioUrl}`;
   const base = normalizeApiBase(settings.apiBase);
   if (base) return `${base}${segment}`;
   return new URL(segment, window.location.origin).href;
+}
+
+function extractAudioPath(audioUrl: string): string | null {
+  const raw = audioUrl.trim();
+  if (!raw.includes("/v1/audio/")) return null;
+  try {
+    const pathname = raw.startsWith("http")
+      ? new URL(raw).pathname
+      : raw.startsWith("/")
+        ? raw.split("?")[0]!
+        : `/${raw.split("?")[0]!}`;
+    return AUDIO_PATH_RE.test(pathname) ? pathname : null;
+  } catch {
+    return null;
+  }
 }

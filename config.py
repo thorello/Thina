@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +23,7 @@ class Settings(BaseSettings):
     """Variaveis de ambiente e caminhos do servidor."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -136,8 +135,8 @@ class Settings(BaseSettings):
         return bool(self.gemini_api_key.strip())
 
 
-@lru_cache
 def get_settings() -> Settings:
+    """Recarrega o .env a cada chamada (alteracoes sem reiniciar o processo)."""
     return Settings()
 
 

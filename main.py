@@ -130,11 +130,20 @@ async def health() -> dict[str, str]:
         if settings.llm_provider == "deepseek"
         else settings.gemini_model
     )
+    mix_voice = settings.kokoro_mix_voice or ""
+    voice_label = settings.kokoro_voice
+    if mix_voice and settings.kokoro_mix_amount > 0:
+        voice_label = (
+            f"{settings.kokoro_voice}+{settings.kokoro_mix_amount:.0%}_{mix_voice}"
+        )
     return {
         "status": "ok",
         "service": "thina",
         "llm_provider": settings.llm_provider,
         "llm_model": llm_model,
+        "kokoro_voice": voice_label,
+        "kokoro_speed": str(settings.kokoro_speed),
+        "kokoro_sentiment": settings.kokoro_sentiment,
     }
 
 

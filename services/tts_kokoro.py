@@ -59,11 +59,28 @@ async def sintetizar(texto: str) -> AudioResult:
         "sentiment": settings.kokoro_sentiment,
         "mix_amount": settings.kokoro_mix_amount,
     }
-    if settings.kokoro_mix_voice:
-        payload["mix_voice"] = settings.kokoro_mix_voice
+    mix_voice = (settings.kokoro_mix_voice or "").strip()
+    mix_amount = float(settings.kokoro_mix_amount)
+    if mix_amount > 0:
+        if not mix_voice:
+            logger.warning(
+                "KOKORO_MIX_AMOUNT=%.2f mas KOKORO_MIX_VOICE vazio; Kokoro ignora a mistura.",
+                mix_amount,
+            )
+        else:
+            payload["mix_voice"] = mix_voice
 
     url = f"{settings.kokoro_server_url}/generate"
-    logger.info("Sintetizando voz via Kokoro (%d caracteres)", len(texto))
+    if mix_voice and mix_amount > 0:
+        logger.info(
+            "Sintetizando voz via Kokoro (%d caracteres): %s + %.0f%% %s",
+            len(texto),
+            settings.kokoro_voice,
+            mix_amount * 100,
+            mix_voice,
+        )
+    else:
+        logger.info("Sintetizando voz via Kokoro (%d caracteres): %s", len(texto), settings.kokoro_voice)
 
     try:
         async with httpx.AsyncClient(timeout=settings.kokoro_timeout) as client:

@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from fastmcp import FastMCP
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -37,20 +38,75 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Personalidade da Thina (system instruction para o Gemini)
 # ---------------------------------------------------------------------------
+THINA_CHAT_INSTRUCTION = """Voce e a Thina, assistente de voz residencial inteligente em portugues do Brasil.
+
+Personalidade:
+- Cordial, objetiva e natural, como uma assistente de casa de confianca.
+- Respostas curtas e faladas (ideal para serem lidas em voz alta), em uma ou duas frases.
+
+Conhecimento geral (sem ferramentas neste modo):
+- Responda perguntas de geografia, ciencia, receitas, noticias e clima com seu conhecimento.
+- Previsao do tempo: use a cidade padrao do contexto se o usuario nao disser outra; responda de forma util e breve.
+- Nao mencione Home Assistant, MCP, ferramentas, entidades nem aplicativos externos, a menos que o usuario peca controle de um aparelho da casa.
+
+Comandos de casa:
+- Se o usuario pedir ligar/desligar luzes, sensores ou automacoes, diga em uma frase que pode ajudar quando o pedido for um comando claro de casa (ex.: "liga a luz da sala").
+
+Regras:
+- O usuario fala a partir de um comodo especifico (area_id); considere isso no contexto.
+- Se houver cidade/local padrao no contexto, use-a em previsao do tempo e clima sem pedir a cidade de novo.
+"""
+
 THINA_SYSTEM_INSTRUCTION = """Voce e a Thina, assistente de voz residencial inteligente em portugues do Brasil.
 
 Personalidade:
 - Cordial, objetiva e natural, como uma assistente de casa de confianca.
 - Respostas curtas e faladas (ideal para serem lidas em voz alta).
 - Confirme antes de acoes que afetem seguranca (portas, alarmes, aquecedores a gas).
-- Nunca invente estados de dispositivos: use sempre as ferramentas para ler sensores ou controlar a casa.
+- Nunca invente estados de dispositivos: use sempre as ferramentas MCP para ler sensores ou controlar a casa.
+
+Conhecimento e pesquisa:
+- Para perguntas gerais (geografia, ciencia, receitas, noticias, clima na cidade, etc.), use a ferramenta Google Search e responda com base nos resultados.
+- Nao recuse perguntas de conhecimento geral: pesquise quando precisar de fatos atuais ou precisos e responda em uma ou duas frases.
+- Para acoes na casa (luzes, sensores, automacoes), use as ferramentas MCP do Home Assistant, nao a pesquisa na web.
 
 Regras:
 - O usuario fala a partir de um comodo especifico (area_id); considere isso no contexto.
+- Se houver cidade/local padrao no contexto, use-a em previsao do tempo e clima sem pedir a cidade de novo.
 - Se nao souber uma entidade exata, use listar_entidades ou pergunte de forma breve.
-- Apos executar acoes, resuma o que foi feito em uma frase amigavel.
+- Apos executar acoes na casa, resuma o que foi feito em uma frase amigavel.
 - Se uma ferramenta falhar, explique o problema de forma simples, sem jargao tecnico.
 """
+
+_WEATHER_PHRASES = (
+    "previsao do tempo",
+    "previsão do tempo",
+    "como esta o tempo",
+    "como está o tempo",
+    "tempo hoje",
+    "tempo amanha",
+    "tempo amanhã",
+    "vai chover",
+    "esta chovendo",
+    "está chovendo",
+    "clima hoje",
+    "clima em",
+    "clima na",
+    "clima no",
+    "temperatura hoje",
+    "temperatura amanha",
+    "temperatura amanhã",
+    "temperatura em",
+    "temperatura na",
+    "graus em",
+    "graus na",
+)
+
+
+def _is_weather_question(texto: str) -> bool:
+    """Perguntas de clima/previsao (modo chat, sem MCP)."""
+    t = texto.lower()
+    return any(p in t for p in _WEATHER_PHRASES)
 
 mcp = FastMCP("ThinaHome")
 
@@ -195,11 +251,88 @@ def _patch_gemini_mcp_schema_filter() -> None:
     mcp_utils._thina_schema_patch = True
 
 
+# Palavras que indicam comando/leitura na casa (MCP). Demais mensagens vao para Google Search.
+_HOME_KEYWORDS = (
+    "ligar",
+    "desligar",
+    "liga ",
+    "desliga ",
+    "acender",
+    "apagar",
+    "acende",
+    "apaga",
+    "luz",
+    "luzes",
+    "lampada",
+    "lâmpada",
+    "interruptor",
+    "tomada",
+    "temperatura",
+    "ar condicionado",
+    "aquecedor",
+    "porta",
+    "alarme",
+    "trancar",
+    "destrancar",
+    "sensor",
+    "entidade",
+    "listar",
+    "media_player",
+    "volume",
+    "televis",
+    "cortina",
+    "persiana",
+    "estado do",
+    "esta ligad",
+    "está ligad",
+    "automatiz",
+)
+
+
+def _needs_home_tools(texto: str) -> bool:
+    """True se o pedido provavelmente exige ferramentas do Home Assistant."""
+    if _is_weather_question(texto):
+        return False
+    t = texto.lower()
+    return any(k in t for k in _HOME_KEYWORDS)
+
+
+def _build_contents(
+    texto: str,
+    area_id: str,
+    historico: list[dict[str, str]] | None,
+) -> list[Any]:
+    user_prompt = _build_user_prompt(texto, area_id)
+    contents: list[Any] = []
+    if historico:
+        for turn in historico:
+            role = turn.get("role", "user")
+            content = turn.get("content", "")
+            contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part(text=content)],
+                )
+            )
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
+    return contents
+
+
 def _build_user_prompt(texto: str, area_id: str) -> str:
-    return (
-        f"Comodo atual (area_id): {area_id}\n"
-        f"Mensagem do usuario: {texto}"
-    )
+    settings = get_settings()
+    parts = [f"Comodo atual (area_id): {area_id}"]
+    city = settings.thina_default_city.strip()
+    if city:
+        parts.append(f"Cidade/local padrao: {city}")
+    parts.append(f"Mensagem do usuario: {texto}")
+    if _is_weather_question(texto):
+        city_hint = city or "a cidade informada pelo usuario"
+        parts.append(
+            "Instrucao: responda previsao ou clima em 1 ou 2 frases curtas para voz. "
+            f"Use {city_hint} se o pedido nao citar outra cidade. "
+            "Nao mencione Home Assistant, MCP, ferramentas nem apps."
+        )
+    return "\n".join(parts)
 
 
 def _extract_response_text(response: types.GenerateContentResponse) -> str:
@@ -216,40 +349,37 @@ def _extract_response_text(response: types.GenerateContentResponse) -> str:
     return "Desculpe, nao consegui formular uma resposta agora."
 
 
-async def processar_mensagem(
-    texto: str,
-    area_id: str,
-    historico: list[dict[str, str]] | None = None,
+async def _gerar_com_google_search(
+    client: genai.Client,
+    settings: Any,
+    contents: list[Any],
 ) -> str:
     """
-    Envia o texto do usuario ao Gemini 1.5 Flash com sessao MCP (ferramentas HA).
+    Perguntas gerais: so Google Search.
 
-    Um subprocess stdio executa este modulo como servidor MCP; o SDK Gemini
-    chama as tools automaticamente (automatic function calling).
+    A API Gemini nao permite google_search e function calling (MCP) no mesmo request.
     """
-    settings = get_settings()
-
-    if not settings.gemini_api_key:
-        raise ValueError("GEMINI_API_KEY nao configurada.")
-
-    user_prompt = _build_user_prompt(texto, area_id)
-    contents: list[Any] = []
-
-    if historico:
-        for turn in historico:
-            role = turn.get("role", "user")
-            content = turn.get("content", "")
-            contents.append(
-                types.Content(
-                    role=role,
-                    parts=[types.Part(text=content)],
-                )
-            )
-
-    contents.append(
-        types.Content(role="user", parts=[types.Part(text=user_prompt)])
+    response = await asyncio.wait_for(
+        client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=THINA_SYSTEM_INSTRUCTION,
+                temperature=0.7,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        ),
+        timeout=settings.gemini_timeout,
     )
+    return _extract_response_text(response)
 
+
+async def _gerar_com_mcp(
+    client: genai.Client,
+    settings: Any,
+    contents: list[Any],
+) -> str:
+    """Comandos da casa: subprocess MCP + ferramentas Home Assistant."""
     server_params = StdioServerParameters(
         command=sys.executable,
         args=["-m", settings.mcp_server_module],
@@ -257,36 +387,72 @@ async def processar_mensagem(
         env=None,
     )
 
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            response = await asyncio.wait_for(
+                client.aio.models.generate_content(
+                    model=settings.gemini_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=THINA_SYSTEM_INSTRUCTION,
+                        temperature=0.7,
+                        tools=[session],
+                    ),
+                ),
+                timeout=settings.gemini_timeout,
+            )
+    return _extract_response_text(response)
+
+
+async def processar_mensagem(
+    texto: str,
+    area_id: str,
+    historico: list[dict[str, str]] | None = None,
+) -> str:
+    """
+    Roteia para DeepSeek ou Gemini conforme LLM_PROVIDER.
+
+    Gemini: Google Search (geral) ou MCP (casa). DeepSeek: chat ou MCP (casa).
+    """
+    settings = get_settings()
+
+    if settings.llm_provider == "deepseek":
+        from services.deepseek_llm import processar_mensagem_deepseek
+
+        return await processar_mensagem_deepseek(texto, area_id, historico)
+
+    if not settings.gemini_api_key:
+        raise ValueError("GEMINI_API_KEY nao configurada.")
+
+    contents = _build_contents(texto, area_id, historico)
     client = genai.Client(api_key=settings.gemini_api_key)
     _patch_gemini_mcp_schema_filter()
 
-    logger.info("Processando mensagem com Gemini (%s) e MCP", settings.gemini_model)
+    usar_mcp = _needs_home_tools(texto)
+    usar_pesquisa = settings.gemini_google_search and not usar_mcp
+    modo = "Google Search" if usar_pesquisa else "MCP (casa)"
+    logger.info(
+        "Processando com Gemini (%s) | modo=%s | texto=%s",
+        settings.gemini_model,
+        modo,
+        texto[:60] + ("..." if len(texto) > 60 else ""),
+    )
 
     try:
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-
-                response = await asyncio.wait_for(
-                    client.aio.models.generate_content(
-                        model=settings.gemini_model,
-                        contents=contents,
-                        config=types.GenerateContentConfig(
-                            system_instruction=THINA_SYSTEM_INSTRUCTION,
-                            temperature=0.7,
-                            tools=[session],
-                        ),
-                    ),
-                    timeout=settings.gemini_timeout,
-                )
+        if usar_pesquisa:
+            resposta = await _gerar_com_google_search(client, settings, contents)
+        else:
+            resposta = await _gerar_com_mcp(client, settings, contents)
     except asyncio.TimeoutError as exc:
-        raise TimeoutError(
-            "Timeout ao aguardar resposta do Gemini/MCP."
-        ) from exc
+        raise TimeoutError("Timeout ao aguardar resposta do Gemini.") from exc
+    except genai_errors.ClientError as exc:
+        logger.exception("Erro da API Gemini")
+        raise RuntimeError(f"Gemini: {exc}") from exc
     except (HAConnectionError, HAAuthError) as exc:
         raise RuntimeError(f"Home Assistant inacessivel durante MCP: {exc}") from exc
 
-    resposta = _extract_response_text(response)
     logger.info("Resposta Thina (%d caracteres)", len(resposta))
     return resposta
 

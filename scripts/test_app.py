@@ -94,9 +94,9 @@ def main() -> int:
 
         print("AVISO: HOME_ASSISTANT_TOKEN vazio no .env")
 
-    if not settings.gemini_api_key.strip():
-
-        print("AVISO: GEMINI_API_KEY vazio no .env")
+    if not settings.llm_api_key_configured():
+        key_name = "DEEPSEEK_API_KEY" if settings.llm_provider == "deepseek" else "GEMINI_API_KEY"
+        print(f"AVISO: {key_name} vazio no .env (LLM_PROVIDER={settings.llm_provider})")
 
 
 

@@ -29,9 +29,19 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # LLM: gemini | deepseek
+    llm_provider: str = "deepseek"
+
     # Gemini
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
+    gemini_google_search: bool = True
+
+    # DeepSeek (API compativel com OpenAI)
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_timeout: float = 90.0
 
     # Home Assistant
     home_assistant_url: str = "http://homeassistant.local:8123"
@@ -49,6 +59,7 @@ class Settings(BaseSettings):
     thina_host: str = "0.0.0.0"
     thina_port: int = 8080
     thina_public_url: str = "http://127.0.0.1:8080"
+    thina_default_city: str = ""
 
     # Mapas e MCP
     areas_map_file: str = "maps/areas.json"
@@ -66,6 +77,14 @@ class Settings(BaseSettings):
     @classmethod
     def strip_trailing_slash(cls, v: str) -> str:
         return v.rstrip("/")
+
+    @field_validator("llm_provider")
+    @classmethod
+    def normalize_llm_provider(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if normalized not in ("gemini", "deepseek"):
+            raise ValueError("LLM_PROVIDER deve ser 'gemini' ou 'deepseek'.")
+        return normalized
 
     @field_validator("kokoro_mix_voice", mode="before")
     @classmethod
@@ -109,6 +128,12 @@ class Settings(BaseSettings):
     def ensure_audio_dir(self) -> None:
         """Garante que o diretorio de audios temporarios existe."""
         AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+
+    def llm_api_key_configured(self) -> bool:
+        """True se a chave do provedor LLM ativo estiver definida."""
+        if self.llm_provider == "deepseek":
+            return bool(self.deepseek_api_key.strip())
+        return bool(self.gemini_api_key.strip())
 
 
 @lru_cache

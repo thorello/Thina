@@ -221,6 +221,15 @@ Testar o servidor MCP isolado:
 python -m services.gemini_mcp
 ```
 
+## Testes automatizados
+
+```powershell
+pip install -r requirements-dev.txt
+pytest
+```
+
+A suíte em `tests/` cobre configuração, contexto do usuário, histórico de conversa, normalização TTS, detecção de apps no PC e o endpoint `/v1/conversar` (com mocks de LLM, Kokoro e Home Assistant). Não é necessário HA, Kokoro nem chaves reais para rodar os testes.
+
 ## Testes manuais
 
 ```powershell

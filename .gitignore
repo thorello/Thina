@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# Contexto privado da Thina (copie maps/private.example -> maps/private)
+maps/thina_user.private.md
+maps/private/
+
 # Python
 .venv/
 venv/

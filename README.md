@@ -47,6 +47,28 @@ copy .env.example .env
 | `THINA_PUBLIC_URL` | URL **acessível pelo host do HA** para baixar o WAV (não use `localhost` se o HA estiver noutra máquina/Docker) |
 | `PC_COMMANDS_ENABLED` | `true` para abrir apps/sites no **PC onde o thina-server roda** (lista branca em `maps/pc_apps.json`) |
 | `PC_APPS_MAP_FILE` | Caminho do mapa de aplicativos permitidos (padrão: `maps/pc_apps.json`) |
+| `THINA_USER_CONTEXT_FILE` | Tom e personalidade (padrão: `maps/thina_user.md`) — pode ir no Git |
+| `THINA_PRIVATE_DIR` | Pasta com contexto privado (padrão: `maps/private/`) — **gitignore** |
+| `THINA_USER_PRIVATE_FILE` | Arquivo legado opcional (`maps/thina_user.private.md`) — também gitignore |
+
+### Personalidade e contexto sobre você
+
+Enviados em **toda** conversa com o LLM:
+
+1. [`maps/thina_user.md`](maps/thina_user.md) — tom e regras (pode ir no Git).
+2. [`maps/private/`](maps/private/) — pasta **não commitada** com vários `.md`:
+
+| Arquivo | Conteúdo |
+|---------|----------|
+| `user.md` | Você: nome, família, preferências |
+| `casa.md` | Casa: apelidos de luzes, cômodos, entidades HA |
+| `rotina.md` | Horários e hábitos |
+| `pc.md` | PC: apps, sites, frases customizadas |
+| `notas.md` | Notas livres |
+
+Primeira vez: `Copy-Item -Recurse maps\private.example maps\private` (modelos em [`maps/private.example/`](maps/private.example/)).
+
+Alterações passam a valer na próxima mensagem, sem reiniciar o servidor.
 
 ### Comandos no PC (Chrome, Spotify, etc.)
 

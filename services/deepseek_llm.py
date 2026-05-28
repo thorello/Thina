@@ -19,8 +19,8 @@ from mcp.client.stdio import stdio_client
 
 from config import BASE_DIR, get_settings
 from services.gemini_mcp import (
-    THINA_CHAT_INSTRUCTION,
-    THINA_SYSTEM_INSTRUCTION,
+    get_thina_chat_instruction,
+    get_thina_system_instruction,
     _build_user_prompt,
     _needs_home_tools,
     _needs_mcp_tools,
@@ -32,16 +32,19 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 10
 
-DEEPSEEK_MCP_INSTRUCTION = THINA_SYSTEM_INSTRUCTION.replace(
-    "- Para perguntas gerais (geografia, ciencia, receitas, noticias, clima na cidade, etc.), "
-    "use a ferramenta Google Search e responda com base nos resultados.\n"
-    "- Nao recuse perguntas de conhecimento geral: pesquise quando precisar de fatos atuais ou precisos "
-    "e responda em uma ou duas frases.\n"
-    "- Para acoes na casa (luzes, sensores, automacoes), use as ferramentas MCP do Home Assistant, "
-    "nao a pesquisa na web.\n",
-    "- Para acoes na casa (luzes, sensores, automacoes), use sempre as ferramentas MCP do Home Assistant.\n"
-    "- Previsao do tempo: se existir entidade weather no HA, use ler_sensor; senao responda com conhecimento geral.\n",
-)
+def _deepseek_mcp_instruction() -> str:
+    """Instrucao MCP do DeepSeek (ajustes + contexto do usuario)."""
+    base = get_thina_system_instruction()
+    return base.replace(
+        "- Para perguntas gerais (geografia, ciencia, receitas, noticias, clima na cidade, etc.), "
+        "use a ferramenta Google Search e responda com base nos resultados.\n"
+        "- Nao recuse perguntas de conhecimento geral: pesquise quando precisar de fatos atuais ou precisos "
+        "e responda em uma ou duas frases.\n"
+        "- Para acoes na casa (luzes, sensores, automacoes), use as ferramentas MCP do Home Assistant, "
+        "nao a pesquisa na web.\n",
+        "- Para acoes na casa (luzes, sensores, automacoes), use sempre as ferramentas MCP do Home Assistant.\n"
+        "- Previsao do tempo: se existir entidade weather no HA, use ler_sensor; senao responda com conhecimento geral.\n",
+    )
 
 
 def _messages_for_request(
@@ -51,7 +54,7 @@ def _messages_for_request(
     *,
     usar_mcp: bool,
 ) -> list[dict[str, Any]]:
-    system = DEEPSEEK_MCP_INSTRUCTION if usar_mcp else THINA_CHAT_INSTRUCTION
+    system = _deepseek_mcp_instruction() if usar_mcp else get_thina_chat_instruction()
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
     ]

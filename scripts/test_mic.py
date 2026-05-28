@@ -573,7 +573,10 @@ def main() -> int:
     mic_wav = _ROOT / "data" / "audio" / "mic_test.wav"
     mic_wav.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Thina: {thina} | area_id: {args.area_id} | voz: {settings.kokoro_voice}")
+    voz = settings.kokoro_voice
+    if settings.kokoro_mix_voice and settings.kokoro_mix_amount > 0:
+        voz = f"{voz} + {settings.kokoro_mix_amount:.0%} {settings.kokoro_mix_voice}"
+    print(f"Thina: {thina} | area_id: {args.area_id} | voz: {voz}")
     if not args.no_wake and not args.texto.strip():
         print("Modo: diga 'Tina' e em seguida seu pedido (para no silencio).")
         print_input_device(args.device)

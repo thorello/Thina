@@ -168,6 +168,7 @@ body {
   border-radius: 50%;
   background: var(--muted);
   box-shadow: 0 0 8px currentColor;
+  transition: background-color 0.55s ease, box-shadow 0.55s ease, opacity 0.45s ease;
 }
 
 .status-pill[data-state="idle"] .status-dot {
@@ -179,11 +180,54 @@ body {
 }
 .status-pill[data-state="thinking"] .status-dot {
   background: var(--violet);
-  animation: blink 0.4s ease infinite;
+  animation: think-pulse 1.4s ease-in-out infinite;
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.7);
+}
+
+@keyframes think-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 8px rgba(167, 139, 250, 0.5);
+  }
+  33% {
+    opacity: 0.7;
+    transform: scale(1.35);
+    box-shadow: 0 0 16px rgba(167, 139, 250, 0.9);
+  }
+  66% {
+    opacity: 0.85;
+    transform: scale(0.85);
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
+  }
 }
 .status-pill[data-state="speaking"] .status-dot {
   background: #34d399;
-  animation: blink 0.6s ease infinite;
+  animation: speak-wave 0.9s ease-in-out infinite;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.65);
+}
+
+@keyframes speak-wave {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+  }
+  25% {
+    opacity: 0.75;
+    transform: scale(1.5);
+    box-shadow: 0 0 18px rgba(52, 211, 153, 0.95);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(0.9);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+  }
+  75% {
+    opacity: 0.8;
+    transform: scale(1.25);
+    box-shadow: 0 0 14px rgba(110, 231, 183, 0.8);
+  }
 }
 .status-pill[data-state="dormant"] .status-dot {
   background: #c08497;

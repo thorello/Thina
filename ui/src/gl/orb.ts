@@ -10,6 +10,17 @@ import {
   VERT_PARTICLE,
 } from "./shaders";
 
+/** Peso 0–1 do estado `center` quando o índice é contínuo. */
+function blendWeight(state: number, center: number): number {
+  const d = Math.abs(state - center);
+  if (d >= 0.92) return 0;
+  const x = 1 - d / 0.92;
+  return x * x * (3 - 2 * x);
+}
+
+/** ~450 ms para cruzar entre estados adjacentes. */
+const STATE_BLEND_SPEED = 2.8;
+
 const DISK_COUNT  = 700;
 const GALAXY_RADIUS = 1;
 const DISK_THICKNESS = 0.1;
@@ -42,7 +53,8 @@ export class OrbRenderer {
   private view  = mat4.create();
   private viewProj = mat4.create();
   private focal = { x: 0.5, y: 0.5 };
-  private state = 0;
+  private stateTarget = 0;
+  private stateSmooth = 0;
   private energy = 0;
   private dormantTarget = 1;
   private dormantSmooth = 1;
@@ -70,7 +82,7 @@ export class OrbRenderer {
     this.coreVao = this.buildCoreVao();
     this.unsub = subscribe((s, e, dormant) => {
       const waking = this.dormantTarget >= 0.5 && !dormant;
-      this.state = stateIndex(s);
+      this.stateTarget = stateIndex(s);
       this.energy = e;
       this.dormantTarget = dormant ? 1 : 0;
       if (waking) this.orbitTime = 0;
@@ -96,6 +108,7 @@ export class OrbRenderer {
       time:       gl.getUniformLocation(this.bgProg, "u_time"),
       state:      gl.getUniformLocation(this.bgProg, "u_state"),
       energy:     gl.getUniformLocation(this.bgProg, "u_energy"),
+      audio:      gl.getUniformLocation(this.bgProg, "u_audio"),
       dormant:    gl.getUniformLocation(this.bgProg, "u_dormant"),
       breath:     gl.getUniformLocation(this.bgProg, "u_breath"),
       resolution: gl.getUniformLocation(this.bgProg, "u_resolution"),
@@ -262,15 +275,22 @@ export class OrbRenderer {
     const gl = this.gl;
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // envelope suavizado no render loop (independe do fps do analyser)
-    const isSpeaking = this.state === 3;
     const nowMs = performance.now();
     const dt = this.prevDrawMs ? Math.min(0.05, (nowMs - this.prevDrawMs) / 1000) : 0.016;
     this.prevDrawMs = nowMs;
     this.time += dt;
 
-    const audioTarget = isSpeaking ? this.energy : 0;
-    const smoothK = audioTarget > this.audioSmooth ? 14 : 5.5;
+    const stateK = 1 - Math.exp(-STATE_BLEND_SPEED * dt);
+    this.stateSmooth += (this.stateTarget - this.stateSmooth) * stateK;
+    const state = this.stateSmooth;
+
+    const wSpeaking = blendWeight(state, 3);
+    const wThinking = blendWeight(state, 2);
+    const wListening = blendWeight(state, 1);
+    const wActiveMotion = Math.min(1, wSpeaking + wThinking * 0.88);
+
+    const audioTarget = this.energy * wSpeaking;
+    const smoothK = audioTarget > this.audioSmooth ? 14 : 3.2;
     this.audioSmooth += (audioTarget - this.audioSmooth) * (1 - Math.exp(-smoothK * dt));
 
     const dormantK = 1 - Math.exp(-3.2 * dt);
@@ -281,10 +301,14 @@ export class OrbRenderer {
     if (alive > 0.01) this.orbitTime += dt;
     const breath = alive * Math.sin(this.time * BREATH_OMEGA);
 
-    const idleBreath = isSpeaking ? 0 : breath * 0.14;
-    let energy = isSpeaking
-      ? 0.38 + this.audioSmooth * 0.62
-      : 0.50 + idleBreath + this.energy * 0.50;
+    const idleBreath = (1 - wActiveMotion) * breath * 0.14;
+    const thinkBoost = wThinking * (
+      0.14 + 0.10 * Math.sin(this.time * 3.6)
+           + 0.06 * Math.sin(this.time * 5.8 + 0.9)
+    );
+    const baseEnergy = 0.50 + idleBreath + this.energy * 0.50 * wListening;
+    const speakEnergy = 0.42 + this.audioSmooth * 0.68;
+    let energy = baseEnergy * (1 - wSpeaking) + speakEnergy * wSpeaking + thinkBoost;
     energy *= 0.45 + alive * 0.55;
     const audio = this.audioSmooth;
 
@@ -294,8 +318,9 @@ export class OrbRenderer {
     // Fundo
     gl.useProgram(this.bgProg);
     gl.uniform1f(this.uBg.time!,        this.time);
-    gl.uniform1f(this.uBg.state!,       this.state);
+    gl.uniform1f(this.uBg.state!,       state);
     gl.uniform1f(this.uBg.energy!,      energy);
+    gl.uniform1f(this.uBg.audio!,       audio);
     gl.uniform1f(this.uBg.dormant!,     dormant);
     gl.uniform1f(this.uBg.breath!,      breath);
     gl.uniform2f(this.uBg.resolution!,  this.canvas.width, this.canvas.height);
@@ -308,7 +333,7 @@ export class OrbRenderer {
     gl.uniformMatrix4fv(this.uPart.viewProj!,     false, this.viewProj);
     gl.uniform1f(this.uPart.time!,        this.time);
     gl.uniform1f(this.uPart.orbitTime!,  this.orbitTime);
-    gl.uniform1f(this.uPart.state!,       this.state);
+    gl.uniform1f(this.uPart.state!,       state);
     gl.uniform1f(this.uPart.energy!,      energy);
     gl.uniform1f(this.uPart.dormant!,     dormant);
     gl.uniform1f(this.uPart.breath!,      breath);
@@ -322,7 +347,7 @@ export class OrbRenderer {
     gl.useProgram(this.coreProg);
     gl.uniformMatrix4fv(this.uCore.viewProj!,     false, this.viewProj);
     gl.uniform1f(this.uCore.time!,        this.time);
-    gl.uniform1f(this.uCore.state!,       this.state);
+    gl.uniform1f(this.uCore.state!,       state);
     gl.uniform1f(this.uCore.energy!,      energy);
     gl.uniform1f(this.uCore.dormant!,     dormant);
     gl.uniform1f(this.uCore.breath!,      breath);
@@ -345,10 +370,11 @@ export function animateSpeakingEnergy(
   const tick = (now: number) => {
     const t = (now - start) / durationMs;
     if (t >= 1) { onEnergy(0); return; }
-    const wave = 0.35
-      + 0.45 * Math.abs(Math.sin(now * 0.012))
-      + 0.20 * Math.sin(now * 0.023);
-    onEnergy(wave);
+    const syllable = Math.abs(Math.sin(now * 0.011));
+    const formant = 0.5 + 0.5 * Math.sin(now * 0.019 + 1.2);
+    const burst = Math.pow(Math.max(0, Math.sin(now * 0.028)), 3.0);
+    const wave = 0.28 + 0.38 * syllable + 0.22 * formant + 0.18 * burst;
+    onEnergy(Math.min(1, wave));
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);

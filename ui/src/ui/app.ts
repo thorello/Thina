@@ -119,14 +119,8 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
             <span class="btn-icon" id="btn-toggle-icon">✦</span>
             <span id="btn-toggle-label">Ativar Thina</span>
           </button>
-          <button type="button" class="btn" id="btn-keep" title="Manter session_id e histórico">
-            <span class="btn-icon">◎</span> Manter conversa ativa
-          </button>
           <button type="button" class="btn btn-primary" id="btn-mic">
             <span class="btn-icon">🎤</span> <span id="btn-mic-label">Ouvir «Tina»</span>
-          </button>
-          <button type="button" class="btn" id="btn-health">
-            <span class="btn-icon">↻</span> Verificar servidor
           </button>
         </div>
         <ul class="hint-list">
@@ -215,8 +209,6 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   const btnToggleThina = $("#btn-toggle-thina", root) as HTMLButtonElement;
   const btnToggleIcon = $("#btn-toggle-icon", root);
   const btnToggleLabel = $("#btn-toggle-label", root);
-  const btnKeep = $("#btn-keep", root) as HTMLButtonElement;
-  const btnHealth = $("#btn-health", root) as HTMLButtonElement;
   const btnSend = $("#btn-send", root) as HTMLButtonElement;
   const btnMic = $("#btn-mic", root) as HTMLButtonElement;
   const btnMicLabel = $("#btn-mic-label", root);
@@ -655,20 +647,6 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   }
 
   btnToggleThina.addEventListener("click", () => toggleThina());
-
-  btnKeep.addEventListener("click", () => {
-    pushChat(
-      "system",
-      sessionId
-        ? `Conversa mantida · sessão ${sessionId.slice(0, 8)}…`
-        : "Envie uma mensagem para iniciar a sessão.",
-    );
-    setState("idle");
-    chatInput.placeholder = "Continue a conversa…";
-    chatInput.focus();
-  });
-
-  btnHealth.addEventListener("click", () => void checkHealth());
   btnMic.addEventListener("click", () => toggleMic());
 
   chatForm.addEventListener("submit", (ev) => {

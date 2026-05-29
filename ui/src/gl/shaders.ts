@@ -48,9 +48,11 @@ vec3 orbit(vec3 p) {
   if (r < 0.001) return vec3(0.0, p.y, 0.0);
   float wThink = stateW(2.0);
   float wSpeak = stateW(3.0);
+  float wListen = stateW(1.0);
   float thinkBoost = 1.0 + wThink * 1.2;
   float speakBoost = 1.0 + wSpeak * u_audio * 0.75;
-  float spin = 0.038 * (1.0 + 0.20 * u_energy) * (1.0 - u_dormant * 0.94) * thinkBoost * speakBoost;
+  float listenBoost = 1.0 + wListen * u_audio * 0.62;
+  float spin = 0.038 * (1.0 + 0.20 * u_energy) * (1.0 - u_dormant * 0.94) * thinkBoost * speakBoost * listenBoost;
   float theta = atan(p.z, p.x) + u_orbitTime * spin;
   return vec3(r * cos(theta), p.y, r * sin(theta));
 }
@@ -72,10 +74,11 @@ void main() {
 
   float wSpeak = stateW(3.0);
   float wThink = stateW(2.0);
+  float wListen = stateW(1.0);
   float alive = 1.0 - u_dormant;
-  float breathMix = (1.0 - max(wSpeak, wThink * 0.88)) * alive;
+  float breathMix = (1.0 - max(max(wSpeak, wThink * 0.88), wListen * 0.85)) * alive;
 
-  // Respiração lenta da galáxia (atenua ao pensar/responder)
+  // Respiração lenta da galáxia (atenua ao pensar/responder/ouvir)
   if (breathMix > 0.01) {
     float radialW = mix(0.12, 1.0, smoothstep(0.0, 1.35, r));
     float scale = 1.0 + 0.062 * u_breath * radialW * breathMix;
@@ -109,6 +112,28 @@ void main() {
     flutter *= (envelope * 0.65 + 0.20) * wSpeak;
     float rNow = length(p.xz) * (1.0 + flutter * 0.028 * radialW);
     p.xz = normalize(p.xz) * rNow;
+  }
+
+  // Ouvindo — ondas concêntricas reativas à voz do utilizador
+  {
+    float theta = atan(p.z, p.x);
+    float radialW = mix(0.28, 1.0, smoothstep(0.04, 1.05, r));
+    float envelope = smoothstep(0.04, 0.88, u_audio);
+
+    float listenA = sin(r * 11.0 - u_time * 12.0 + a_seed * 16.0);
+    float listenB = sin(r * 7.5 - u_time * 8.5 - theta * 2.2 + a_seed * 20.0);
+    float waveFront = smoothstep(0.16, 0.90, listenA) * 0.48
+                    + smoothstep(0.10, 0.82, listenB) * 0.36;
+    float waveAmp = (0.028 + 0.065 * envelope) * wListen;
+    p.xz *= 1.0 + waveFront * waveAmp * radialW;
+
+    float vocal = sin(u_time * 21.0 + a_seed * 28.0) * envelope;
+    vocal += sin(u_time * 14.0 + r * 4.5 + theta * 1.6) * envelope * 0.50;
+    p.y += vocal * 0.038 * radialW * wListen;
+
+    float peak = pow(envelope, 2.0) * wListen;
+    p.xz *= 1.0 + peak * 0.08 * radialW;
+    p.y *= 1.0 + peak * 0.035 * radialW;
   }
 
   // Pensando — hélice sináptica + ondas de impulso que percorrem o disco
@@ -158,7 +183,12 @@ void main() {
     float vocalPop = pow(max(0.0, sin(u_time * 7.5 - r * 6.0 + a_seed * 28.0)), 5.0);
     sz += wSpeak * (0.32 + envelope * 0.55 + vocalPop * envelope * 0.45);
   }
-  sz += stateW(1.0) * 0.25;
+  {
+    float envelope = smoothstep(0.04, 0.88, u_audio);
+    float listenPop = pow(max(0.0, sin(u_time * 8.5 - r * 5.5 + a_seed * 24.0)), 5.0);
+    sz += wListen * (0.28 + envelope * 0.48 + listenPop * envelope * 0.38);
+  }
+  sz += stateW(1.0) * 0.12;
 
   gl_PointSize = sz * 14.0 / depth;
 
@@ -183,6 +213,12 @@ void main() {
     twSpeak *= 0.75 + 0.25 * envelope;
     twinkle = mix(twinkle, twSpeak, wSpeak);
   }
+  {
+    float envelope = smoothstep(0.04, 0.88, u_audio);
+    float twListen = (0.42 + 0.58 * sin(u_time * (8.5 + a_seed * 6.0) + a_seed * 36.0));
+    twListen *= 0.70 + 0.30 * envelope;
+    twinkle = mix(twinkle, twListen, wListen);
+  }
   col *= 0.65 + 0.35 * twinkle;
   col = stateTint(col);
 
@@ -197,6 +233,13 @@ void main() {
     col *= 1.0 + vocalFlash * (0.65 + 0.35 * envelope) * wSpeak;
     col += vec3(0.12, 0.62, 0.48) * vocalFlash * (0.35 + 0.40 * envelope) * wSpeak;
     col += vec3(0.18, 0.82, 0.68) * envelope * 0.18 * wSpeak;
+  }
+  {
+    float envelope = smoothstep(0.04, 0.88, u_audio);
+    float listenFlash = pow(max(0.0, sin(u_time * 10.5 - r * 4.8 + a_seed * 22.0)), 9.0);
+    col *= 1.0 + listenFlash * (0.55 + 0.35 * envelope) * wListen;
+    col += vec3(0.22, 0.58, 0.95) * listenFlash * (0.30 + 0.35 * envelope) * wListen;
+    col += vec3(0.35, 0.78, 1.0) * envelope * 0.16 * wListen;
   }
 
   vec3 dHalo = vec3(0.48, 0.24, 0.36);
@@ -276,7 +319,14 @@ void main() {
   float vocalA = sin(u_time * 16.0) * envelope;
   float vocalB = sin(u_time * 24.0 + 0.6) * envelope * 0.45;
   float breathSpeak = 1.0 + (0.08 + 0.14 * envelope) * breathWave + vocalA * 0.04 + vocalB * 0.025;
-  float breath = breathIdle * wIdle + breathThink * wThink + breathSpeak * wSpeak;
+  float listenEnv = smoothstep(0.04, 0.88, u_audio);
+  float listenRipple = sin(u_time * 7.8 + listenEnv * 2.4) * listenEnv;
+  float listenOrganic = clamp(listenEnv + listenRipple * 0.14, 0.0, 1.0);
+  float listenWave = (listenOrganic - 0.38) * 1.6;
+  float listenA = sin(u_time * 18.0) * listenEnv;
+  float listenB = sin(u_time * 26.0 + 0.8) * listenEnv * 0.42;
+  float breathListen = 1.0 + (0.06 + 0.12 * listenEnv) * listenWave + listenA * 0.035 + listenB * 0.022;
+  float breath = breathIdle * wIdle + breathThink * wThink + breathSpeak * wSpeak + breathListen * wListen;
   if (u_dormant > 0.05) breath = mix(breath, 1.0, u_dormant);
 
   float vis = mix(0.55 + 0.45 * u_energy, 0.40 + 0.22 * u_energy, u_dormant);
@@ -286,7 +336,7 @@ void main() {
   float depth = max(0.5, clip.w);
 
   float radiusPx = mix(60.0, 96.0, vis) * breath;
-  radiusPx += wListen * 12.0;
+  radiusPx += wListen * (14.0 + listenEnv * 16.0 + listenRipple * 8.0);
   {
     float thinkPulse = sin(u_time * 3.6) * 0.5 + sin(u_time * 5.9 + 0.8) * 0.3;
     radiusPx += wThink * (14.0 + thinkPulse * 10.0);
@@ -312,9 +362,11 @@ void main() {
   col *= 0.65 + 0.35 * twinkle;
   col *= 1.0 + 0.08 * u_breath * (1.0 - u_dormant);
   col *= 1.0 + envelope * 0.22 * wSpeak;
+  col *= 1.0 + listenEnv * 0.18 * wListen;
   v_color = stateTint(col);
   v_alpha = (0.50 + 0.35 * vis) * (0.80 + 0.12 * u_energy) * (1.0 + 0.06 * u_breath * (1.0 - u_dormant));
   v_alpha *= mix(1.0, 0.85 + 0.25 * envelope, wSpeak);
+  v_alpha *= mix(1.0, 0.82 + 0.28 * listenEnv, wListen);
 }
 `;
 
@@ -347,6 +399,7 @@ void main() {
 
   float wThink = stateW(2.0);
   float wSpeak = stateW(3.0);
+  float wListen = stateW(1.0);
   {
     float ring1 = sin(d * 10.0 - u_time * 5.5) * 0.5 + 0.5;
     float ring2 = sin(d * 14.0 - u_time * 7.2 + 1.1) * 0.5 + 0.5;
@@ -366,6 +419,15 @@ void main() {
     col += vec3(0.20, 0.88, 0.62) * ring1 * (0.20 + 0.28 * env) * wSpeak;
     col += vec3(0.30, 0.95, 0.75) * ring2 * (0.12 + 0.18 * env) * wSpeak;
     col += vec3(0.45, 0.98, 0.85) * ring3 * (0.08 + 0.12 * env) * wSpeak;
+  }
+  {
+    float env = smoothstep(0.04, 0.88, u_audio);
+    float ring1 = sin(d * 12.0 - u_time * 10.5) * 0.5 + 0.5;
+    float ring2 = sin(d * 17.0 - u_time * 13.0 + 1.0) * 0.5 + 0.5;
+    ring1 *= smoothstep(0.10, 0.94, d) * (1.0 - smoothstep(0.88, 1.0, d));
+    ring2 *= smoothstep(0.20, 0.90, d) * (1.0 - smoothstep(0.82, 1.0, d));
+    col += vec3(0.28, 0.62, 0.98) * ring1 * (0.18 + 0.24 * env) * wListen;
+    col += vec3(0.40, 0.78, 1.0) * ring2 * (0.10 + 0.16 * env) * wListen;
   }
 
   float glow = exp(-d * d * 14.0) + exp(-d * d * 4.5) * 0.25;
@@ -428,9 +490,12 @@ void main() {
   vec3 nebB    = vec3(0.04, 0.09, 0.18);
   float wThink = stateWAny(2.0);
   float wSpeak = stateWAny(3.0);
+  float wListen = stateWAny(1.0);
   float wError = stateWAny(4.0);
   nebA = mix(nebA, vec3(0.16, 0.05, 0.32), wThink);
   nebB = mix(nebB, vec3(0.06, 0.05, 0.26), wThink);
+  nebA = mix(nebA, vec3(0.06, 0.12, 0.22), wListen);
+  nebB = mix(nebB, vec3(0.03, 0.08, 0.16), wListen);
   nebA = mix(nebA, vec3(0.04, 0.14, 0.18), wSpeak);
   nebB = mix(nebB, vec3(0.02, 0.10, 0.14), wSpeak);
   nebA = mix(nebA, vec3(0.22, 0.04, 0.08), wError);
@@ -460,6 +525,13 @@ void main() {
     aurora *= sin(dist * 6.0 - u_time * 3.8) * 0.5 + 0.5;
     neb *= 1.0 + (0.28 + 0.32 * env) * aurora * alive * stateW(3.0);
   }
+  {
+    float angle = atan(p.y, p.x);
+    float env = smoothstep(0.04, 0.88, u_audio);
+    float aurora = sin(angle * 3.5 + u_time * 2.8 - dist * 5.0) * 0.5 + 0.5;
+    aurora *= sin(dist * 7.0 - u_time * 4.2) * 0.5 + 0.5;
+    neb *= 1.0 + (0.22 + 0.38 * env) * aurora * alive * stateW(1.0);
+  }
   vec3 col = deep;
   col = mix(col, nebB, neb * 0.6);
   col = mix(col, nebA, neb * neb * 0.7);
@@ -483,6 +555,16 @@ void main() {
     col += vec3(0.22, 0.85, 0.68) * sonic2 * (0.05 + 0.10 * env);
   }
 
+  {
+    float env = smoothstep(0.04, 0.88, u_audio);
+    float sonic = sin(dist * 15.0 - u_time * 11.0) * 0.5 + 0.5;
+    sonic *= exp(-dist * 2.4) * alive * stateW(1.0);
+    col += vec3(0.20, 0.55, 0.95) * sonic * (0.07 + 0.12 * env);
+    float sonic2 = sin(dist * 10.0 - u_time * 8.0 + 1.5) * 0.5 + 0.5;
+    sonic2 *= exp(-dist * 3.2) * alive * stateW(1.0);
+    col += vec3(0.32, 0.72, 1.0) * sonic2 * (0.04 + 0.09 * env);
+  }
+
   // Estrelas de fundo (mais frias e fracas quando parada)
   float starMul = mix(1.0, 0.42, u_dormant);
   vec3 starTint = mix(vec3(1.0), vec3(0.85, 0.55, 0.65), u_dormant);
@@ -497,14 +579,20 @@ void main() {
   float corePulseSpeak = 1.0 + 0.18 * sin(u_time * 5.2) * (0.5 + 0.5 * envGlow)
                            + 0.14 * sin(u_time * 8.8 + 0.5) * envGlow
                            + 0.08 * sin(u_time * 14.0) * envGlow;
-  float corePulse = corePulseIdle * max(0.0, 1.0 - wThink - wSpeak)
+  float corePulseListen = 1.0 + 0.16 * sin(u_time * 6.0) * (0.5 + 0.5 * envGlow)
+                            + 0.12 * sin(u_time * 9.5 + 0.6) * envGlow
+                            + 0.07 * sin(u_time * 15.0) * envGlow;
+  float corePulse = corePulseIdle * max(0.0, 1.0 - wThink - wSpeak - wListen * 0.85)
                   + corePulseThink * stateW(2.0)
-                  + corePulseSpeak * stateW(3.0);
+                  + corePulseSpeak * stateW(3.0)
+                  + corePulseListen * stateW(1.0);
   vec3 glowA = mix(vec3(1.0, 0.98, 0.88), vec3(0.95, 0.55, 0.62), u_dormant);
   vec3 glowB = mix(vec3(1.0, 0.82, 0.45), vec3(0.72, 0.28, 0.38), u_dormant);
   vec3 glowC = mix(vec3(0.5, 0.6, 1.0),  vec3(0.45, 0.18, 0.28), u_dormant);
   glowB = mix(glowB, vec3(0.35, 0.95, 0.72), stateW(3.0) * 0.55);
+  glowB = mix(glowB, vec3(0.42, 0.78, 1.0), stateW(1.0) * 0.48);
   glowC = mix(glowC, vec3(0.25, 0.82, 0.62), stateW(3.0) * 0.45);
+  glowC = mix(glowC, vec3(0.30, 0.62, 0.98), stateW(1.0) * 0.42);
   float glowStr = mix(1.0 + 0.12 * u_breath * alive, 1.35, u_dormant);
   col += glowA * exp(-distBreath*distBreath*80.0) * corePulse * (0.14 + 0.10 * u_energy) * glowStr;
   col += glowB * exp(-distBreath*distBreath*28.0) * corePulse * (0.07 + 0.06 * u_energy) * glowStr;

@@ -287,10 +287,14 @@ export class OrbRenderer {
     const wSpeaking = blendWeight(state, 3);
     const wThinking = blendWeight(state, 2);
     const wListening = blendWeight(state, 1);
-    const wActiveMotion = Math.min(1, wSpeaking + wThinking * 0.88);
+    const wActiveMotion = Math.min(
+      1,
+      wSpeaking + wThinking * 0.88 + wListening * Math.min(1, this.audioSmooth * 1.15),
+    );
 
-    const audioTarget = this.energy * wSpeaking;
-    const smoothK = audioTarget > this.audioSmooth ? 14 : 3.2;
+    const wAudioReact = Math.min(1, wSpeaking + wListening * 0.92);
+    const audioTarget = this.energy * wAudioReact;
+    const smoothK = audioTarget > this.audioSmooth ? 16 : 3.6;
     this.audioSmooth += (audioTarget - this.audioSmooth) * (1 - Math.exp(-smoothK * dt));
 
     const dormantK = 1 - Math.exp(-3.2 * dt);
@@ -306,9 +310,13 @@ export class OrbRenderer {
       0.14 + 0.10 * Math.sin(this.time * 3.6)
            + 0.06 * Math.sin(this.time * 5.8 + 0.9)
     );
-    const baseEnergy = 0.50 + idleBreath + this.energy * 0.50 * wListening;
+    const listenEnergy = 0.44 + this.audioSmooth * 0.62;
     const speakEnergy = 0.42 + this.audioSmooth * 0.68;
-    let energy = baseEnergy * (1 - wSpeaking) + speakEnergy * wSpeaking + thinkBoost;
+    const baseEnergy = 0.50 + idleBreath;
+    let energy = baseEnergy * (1 - wSpeaking - wListening)
+               + listenEnergy * wListening
+               + speakEnergy * wSpeaking
+               + thinkBoost;
     energy *= 0.45 + alive * 0.55;
     const audio = this.audioSmooth;
 

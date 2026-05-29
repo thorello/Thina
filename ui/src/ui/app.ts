@@ -16,6 +16,7 @@ import {
   unlockResponseAudio,
 } from "../speech/response-audio";
 import { micLog, subscribeMicLogUi, type MicLogEntry } from "../speech/log";
+import { startMicLevel, stopMicLevel, type MicLevelFrame } from "../speech/mic-level";
 import {
   isSpeechRecognitionSupported,
   WakeListener,
@@ -30,6 +31,7 @@ import {
   subscribe,
   type AssistantState,
 } from "../state/assistant";
+import { mountMicVisualizer } from "./mic-visualizer";
 
 type ChatRole = "user" | "thina" | "system";
 
@@ -56,6 +58,31 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   let micActive = false;
   /** Só mostra transcrição / placeholder de voz após «Tina» nesta escuta. */
   let micWakeUnlocked = false;
+  let suppressMicEnergyUntil = 0;
+
+  function isMicListeningVisual(): boolean {
+    if (!micActive || wakeListener.getPhase() === "off") return false;
+    const st = getState();
+    return st !== "thinking" && st !== "speaking" && st !== "error";
+  }
+
+  function onMicFrame(frame: MicLevelFrame): void {
+    const listening = isMicListeningVisual();
+    micVisualizer.update(frame.waveform, listening);
+    if (listening) {
+      micPanelEl.classList.toggle("mic-panel--listening", frame.energy > 0.06);
+      micPanelEl.style.setProperty("--mic-energy", String(frame.energy));
+    } else {
+      micPanelEl.classList.remove("mic-panel--listening");
+      micPanelEl.style.setProperty("--mic-energy", "0");
+    }
+
+    if (!micActive) return;
+    if (performance.now() < suppressMicEnergyUntil) return;
+    const st = getState();
+    if (st === "thinking" || st === "speaking" || st === "error") return;
+    setEnergy(frame.energy);
+  }
   const wakeListener = new WakeListener({
     onPhase: (phase) => {
       if (phase === "waiting_wake") {
@@ -119,13 +146,10 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
             <span class="btn-icon" id="btn-toggle-icon">✦</span>
             <span id="btn-toggle-label">Ativar Thina</span>
           </button>
-          <button type="button" class="btn btn-primary" id="btn-mic">
-            <span class="btn-icon">🎤</span> <span id="btn-mic-label">Ouvir «Tina»</span>
-          </button>
         </div>
         <ul class="hint-list">
           <li>A Thina liga o microfone ao abrir o painel (Chrome/Edge). Diga «Tina» e o pedido.</li>
-          <li><strong>Ativar / Parar Thina</strong> alterna o estado; <strong>Esc</strong> para parar tudo de emergência.</li>
+          <li><strong>Ativar / Parar Thina</strong> liga ou desliga o microfone; <strong>Esc</strong> para emergência.</li>
           <li>No <strong>ReSpeaker</strong>, a ativação é pelo Home Assistant, não por esta página.</li>
         </ul>
       </section>
@@ -133,6 +157,12 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
       <section class="panel mic-panel" id="mic-panel">
         <h2>Microfone <span class="mic-live-dot" id="mic-live-dot" hidden></span></h2>
         <p class="mic-status" id="mic-status">A ligar microfone…</p>
+        <div class="mic-listen-viz" id="mic-listen-viz" hidden>
+          <div class="mic-wave-wrap">
+            <canvas class="mic-wave-canvas" id="mic-wave-canvas" aria-hidden="true"></canvas>
+          </div>
+          <p class="mic-listen-label" id="mic-listen-label">Ouvindo</p>
+        </div>
         <div class="mic-transcript" id="mic-transcript" aria-live="polite">
           <span class="mic-transcript-muted">Após «Tina», o que disser aparece aqui…</span>
         </div>
@@ -141,11 +171,6 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
           <summary>Log (também no Console F12 → filtre «Thina Mic»)</summary>
           <pre class="mic-log-view" id="mic-log-view"></pre>
         </details>
-      </section>
-
-      <section class="panel">
-        <h2>Exemplos para a Thina</h2>
-        <div class="cmd-grid" id="quick-cmds"></div>
       </section>
     </aside>
 
@@ -156,37 +181,56 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     </div>
 
     <aside class="right-col">
-      <section class="panel" style="flex:1;display:flex;flex-direction:column;min-height:0">
-        <h2>Conversa</h2>
+      <section class="panel panel-chat">
+        <div class="panel-head">
+          <h2>Conversa</h2>
+          <div class="settings-menu">
+            <button
+              type="button"
+              class="btn btn-gear"
+              id="btn-settings"
+              aria-label="Configurações"
+              aria-expanded="false"
+              aria-controls="settings-popover"
+              title="Configurações"
+            >
+              <svg class="gear-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
+              </svg>
+            </button>
+            <div class="settings-popover" id="settings-popover" hidden>
+              <form class="settings-form" id="settings-form">
+                <div class="field">
+                  <label for="api-base">URL do servidor Thina</label>
+                  <input type="text" id="api-base" placeholder="(vazio) mesmo host — recomendado no npm run dev" />
+                </div>
+                <div class="field">
+                  <label for="area-id">Cômodo (area_id)</label>
+                  <select id="area-id"></select>
+                </div>
+                <label class="field-check">
+                  <input type="checkbox" id="auto-play" checked />
+                  Reproduzir áudio da resposta no navegador
+                </label>
+                <label class="field-check">
+                  <input type="checkbox" id="wake-enabled" />
+                  Ligar microfone ao abrir o painel
+                </label>
+                <button type="submit" class="btn btn-primary">Salvar configurações</button>
+              </form>
+              <div class="health-grid" id="health-grid" hidden></div>
+              <div class="settings-examples">
+                <h3>Exemplos para a Thina</h3>
+                <div class="cmd-grid" id="quick-cmds"></div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="chat-log" id="chat-log"></div>
         <form class="input-row" id="chat-form">
           <input type="text" id="chat-input" placeholder="Fale com a Thina por texto…" autocomplete="off" />
           <button type="submit" class="btn btn-primary" id="btn-send">Enviar</button>
         </form>
-      </section>
-
-      <section class="panel">
-        <h2>Configurações</h2>
-        <form class="settings-form" id="settings-form">
-          <div class="field">
-            <label for="api-base">URL do servidor Thina</label>
-            <input type="text" id="api-base" placeholder="(vazio) mesmo host — recomendado no npm run dev" />
-          </div>
-          <div class="field">
-            <label for="area-id">Cômodo (area_id)</label>
-            <select id="area-id"></select>
-          </div>
-          <label class="field-check">
-            <input type="checkbox" id="auto-play" checked />
-            Reproduzir áudio da resposta no navegador
-          </label>
-          <label class="field-check">
-            <input type="checkbox" id="wake-enabled" />
-            Ligar microfone ao abrir o painel
-          </label>
-          <button type="submit" class="btn btn-primary">Salvar configurações</button>
-        </form>
-        <div class="health-grid" id="health-grid" hidden></div>
       </section>
     </aside>
 
@@ -210,8 +254,8 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   const btnToggleIcon = $("#btn-toggle-icon", root);
   const btnToggleLabel = $("#btn-toggle-label", root);
   const btnSend = $("#btn-send", root) as HTMLButtonElement;
-  const btnMic = $("#btn-mic", root) as HTMLButtonElement;
-  const btnMicLabel = $("#btn-mic-label", root);
+  const btnSettings = $("#btn-settings", root) as HTMLButtonElement;
+  const settingsPopover = $("#settings-popover", root);
   const wakeEnabledCheck = $("#wake-enabled", root) as HTMLInputElement;
   const micPanelEl = $("#mic-panel", root);
   const micStatusEl = $("#mic-status", root);
@@ -219,6 +263,15 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   const micWakeFlagEl = $("#mic-wake-flag", root);
   const micLogViewEl = $("#mic-log-view", root);
   const micLiveDotEl = $("#mic-live-dot", root);
+  const micListenVizEl = $("#mic-listen-viz", root);
+  const micWaveCanvas = $("#mic-wave-canvas", root) as HTMLCanvasElement;
+  const micListenLabelEl = $("#mic-listen-label", root);
+
+  const micVisualizer = mountMicVisualizer(
+    micListenVizEl,
+    micWaveCanvas,
+    micListenLabelEl,
+  );
 
   const quickExamples = [
     "Acende a luz da sala",
@@ -235,6 +288,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     b.addEventListener("click", () => {
       chatInput.value = text;
       chatInput.focus();
+      setSettingsOpen(false);
     });
     quickCmds.appendChild(b);
   });
@@ -305,6 +359,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     statusPill.classList.add("status-pill--wake");
 
     stopWakePulseAnim?.();
+    suppressMicEnergyUntil = performance.now() + 520;
     stopWakePulseAnim = animateSpeakingEnergy((e) => setEnergy(e), 500);
 
     if (getState() === "idle") setState("listening");
@@ -315,17 +370,24 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
 
   function updateMicPhase(phase: string): void {
     micLiveDotEl.hidden = phase === "off";
-    if (phase === "off") setMicWakeHit(false);
+    if (phase === "off") {
+      setMicWakeHit(false);
+      micVisualizer.reset();
+      micPanelEl.classList.remove("mic-panel--listening");
+      micPanelEl.style.setProperty("--mic-energy", "0");
+      return;
+    }
+    if (phase === "waiting_wake") {
+      micListenLabelEl.textContent = "Aguardando «Tina»…";
+    } else if (phase === "waiting_command") {
+      micListenLabelEl.textContent = "Ouvindo o pedido…";
+    }
   }
 
   function applySettingsToForm(): void {
     apiBaseInput.value = settings.apiBase;
     autoPlayCheck.checked = settings.autoPlayAudio;
     wakeEnabledCheck.checked = settings.wakeWordEnabled;
-    if (!isSpeechRecognitionSupported()) {
-      btnMic.disabled = true;
-      btnMic.title = "Use Chrome ou Edge para reconhecimento de voz";
-    }
     fillAreaSelect();
   }
 
@@ -353,14 +415,16 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
 
   function stopMic(quiet = false): void {
     if (!micActive) return;
+    stopMicLevel();
     wakeListener.stop();
     micActive = false;
     thinaActive = false;
+    micVisualizer.reset();
+    micPanelEl.classList.remove("mic-panel--listening");
+    micPanelEl.style.setProperty("--mic-energy", "0");
     setDormant(true);
     updateThinaToggleUi();
     resetVoiceInputPreview();
-    btnMicLabel.textContent = "Ouvir «Tina»";
-    btnMic.classList.remove("btn-wake");
     updateMicPhase("off");
     setMicStatus("Microfone desligado.");
     setState("idle");
@@ -383,27 +447,19 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     resetVoiceInputPreview();
     setMicWakeHit(false);
     wakeListener.start();
+    void startMicLevel(onMicFrame).catch((err) => {
+      micLog.warn("Analisador de microfone indisponível", {
+        message: (err as Error).message,
+      });
+    });
     micActive = true;
     thinaActive = true;
     setDormant(false);
     updateThinaToggleUi();
-    btnMicLabel.textContent = "Parar de ouvir";
-    btnMic.classList.add("btn-wake");
     updateMicPhase("waiting_wake");
-    setMicStatus("A pedir acesso ao microfone…");
-    if (!opts?.quiet) {
-      pushChat(
-        "system",
-        "Aguardando «Tina»… Abra F12 e filtre «Thina Mic» se nada aparecer.",
-      );
-    }
+    setMicStatus(opts?.quiet ? "A pedir acesso ao microfone…" : "Aguardando «Tina»…");
     setState("idle");
     return true;
-  }
-
-  function toggleMic(): void {
-    if (micActive) stopMic();
-    else startMic();
   }
 
   function fillAreaSelect(): void {
@@ -444,8 +500,17 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   function setBusy(busy: boolean): void {
     btnSend.disabled = busy;
     btnToggleThina.disabled = false;
-    if (!micActive) btnMic.disabled = busy;
     chatInput.disabled = busy;
+  }
+
+  function setSettingsOpen(open: boolean): void {
+    settingsPopover.hidden = !open;
+    btnSettings.setAttribute("aria-expanded", String(open));
+    btnSettings.classList.toggle("btn-gear--open", open);
+  }
+
+  function toggleSettings(): void {
+    setSettingsOpen(settingsPopover.hidden);
   }
 
   /** Interrompe pedido, áudio, animação e microfone. */
@@ -456,6 +521,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     stopSpeakAnim = null;
     stopWakePulseAnim?.();
     stopWakePulseAnim = null;
+    stopMicLevel();
     stopResponseAudio();
     setEnergy(0);
     if (micActive) stopMic(true);
@@ -526,16 +592,6 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
         fillAreaSelect();
       }
       setState("idle");
-      const haNote =
-        health.ha_ok === false
-          ? ` · HA offline (${health.ha_url ?? "?"}) — painel usa só áudio do browser`
-          : health.ha_ok
-            ? " · HA OK"
-            : "";
-      pushChat(
-        "system",
-        `Servidor OK · ${health.llm_provider} / ${health.llm_model}${haNote}`,
-      );
       renderHealth(health);
     } catch (e) {
       setState("error");
@@ -647,7 +703,18 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   }
 
   btnToggleThina.addEventListener("click", () => toggleThina());
-  btnMic.addEventListener("click", () => toggleMic());
+  btnSettings.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    toggleSettings();
+  });
+  document.addEventListener("click", (ev) => {
+    if (settingsPopover.hidden) return;
+    const menu = root.querySelector(".settings-menu");
+    if (menu && !menu.contains(ev.target as Node)) {
+      setSettingsOpen(false);
+    }
+  });
+  settingsPopover.addEventListener("click", (ev) => ev.stopPropagation());
 
   chatForm.addEventListener("submit", (ev) => {
     ev.preventDefault();
@@ -666,6 +733,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     };
     saveSettings(settings);
     pushChat("system", "Configurações salvas.");
+    setSettingsOpen(false);
     if (settings.wakeWordEnabled && !wasWake && !micActive) startMic();
     if (!settings.wakeWordEnabled && micActive) stopMic();
     void refreshAreas();
@@ -679,11 +747,6 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     await checkHealth();
     tryAutoStartMic();
   });
-
-  pushChat(
-    "system",
-    "Painel pronto. O microfone liga automaticamente — diga «Tina» ou use o texto abaixo.",
-  );
 
   return {
     emergencyStop: () => {

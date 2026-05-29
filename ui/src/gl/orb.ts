@@ -41,6 +41,8 @@ export class OrbRenderer {
   private focal = { x: 0.5, y: 0.5 };
   private state = 0;
   private energy = 0;
+  private dormantTarget = 1;
+  private dormantSmooth = 1;
   private audioSmooth = 0;
   private prevDrawMs = 0;
   private time  = 0;
@@ -60,7 +62,11 @@ export class OrbRenderer {
     this.cacheUniforms();
     this.vao = this.buildGalaxy();
     this.coreVao = this.buildCoreVao();
-    this.unsub = subscribe((s, e) => { this.state = stateIndex(s); this.energy = e; });
+    this.unsub = subscribe((s, e, dormant) => {
+      this.state = stateIndex(s);
+      this.energy = e;
+      this.dormantTarget = dormant ? 1 : 0;
+    });
     this.resize();
     window.addEventListener("resize", this.onResize);
   }
@@ -82,6 +88,7 @@ export class OrbRenderer {
       time:       gl.getUniformLocation(this.bgProg, "u_time"),
       state:      gl.getUniformLocation(this.bgProg, "u_state"),
       energy:     gl.getUniformLocation(this.bgProg, "u_energy"),
+      dormant:    gl.getUniformLocation(this.bgProg, "u_dormant"),
       resolution: gl.getUniformLocation(this.bgProg, "u_resolution"),
       center:     gl.getUniformLocation(this.bgProg, "u_center"),
     };
@@ -91,6 +98,7 @@ export class OrbRenderer {
       time:         gl.getUniformLocation(this.particleProg, "u_time"),
       state:        gl.getUniformLocation(this.particleProg, "u_state"),
       energy:       gl.getUniformLocation(this.particleProg, "u_energy"),
+      dormant:      gl.getUniformLocation(this.particleProg, "u_dormant"),
       audio:        gl.getUniformLocation(this.particleProg, "u_audio"),
       screenOffset: gl.getUniformLocation(this.particleProg, "u_screenOffset"),
     };
@@ -100,6 +108,7 @@ export class OrbRenderer {
       time:         gl.getUniformLocation(this.coreProg, "u_time"),
       state:        gl.getUniformLocation(this.coreProg, "u_state"),
       energy:       gl.getUniformLocation(this.coreProg, "u_energy"),
+      dormant:      gl.getUniformLocation(this.coreProg, "u_dormant"),
       audio:        gl.getUniformLocation(this.coreProg, "u_audio"),
       screenOffset: gl.getUniformLocation(this.coreProg, "u_screenOffset"),
       resolution:   gl.getUniformLocation(this.coreProg, "u_resolution"),
@@ -247,10 +256,16 @@ export class OrbRenderer {
     const smoothK = audioTarget > this.audioSmooth ? 14 : 5.5;
     this.audioSmooth += (audioTarget - this.audioSmooth) * (1 - Math.exp(-smoothK * dt));
 
+    const dormantK = 1 - Math.exp(-3.2 * dt);
+    this.dormantSmooth +=
+      (this.dormantTarget - this.dormantSmooth) * dormantK;
+    const dormant = this.dormantSmooth;
+
     const idleBreath = isSpeaking ? 0 : 0.10 * Math.sin(this.time * 0.72);
-    const energy = isSpeaking
+    let energy = isSpeaking
       ? 0.38 + this.audioSmooth * 0.62
       : 0.50 + idleBreath + this.energy * 0.50;
+    energy *= 1.0 - dormant * 0.55;
     const audio = this.audioSmooth;
 
     this.updateView();
@@ -261,6 +276,7 @@ export class OrbRenderer {
     gl.uniform1f(this.uBg.time!,        this.time);
     gl.uniform1f(this.uBg.state!,       this.state);
     gl.uniform1f(this.uBg.energy!,      energy);
+    gl.uniform1f(this.uBg.dormant!,     dormant);
     gl.uniform2f(this.uBg.resolution!,  this.canvas.width, this.canvas.height);
     gl.uniform2f(this.uBg.center!,      this.focal.x, this.focal.y);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -272,6 +288,7 @@ export class OrbRenderer {
     gl.uniform1f(this.uPart.time!,        this.time);
     gl.uniform1f(this.uPart.state!,       this.state);
     gl.uniform1f(this.uPart.energy!,      energy);
+    gl.uniform1f(this.uPart.dormant!,     dormant);
     gl.uniform1f(this.uPart.audio!,       audio);
     gl.uniform2f(this.uPart.screenOffset!, offX, offY);
     gl.bindVertexArray(this.vao);
@@ -284,6 +301,7 @@ export class OrbRenderer {
     gl.uniform1f(this.uCore.time!,        this.time);
     gl.uniform1f(this.uCore.state!,       this.state);
     gl.uniform1f(this.uCore.energy!,      energy);
+    gl.uniform1f(this.uCore.dormant!,     dormant);
     gl.uniform1f(this.uCore.audio!,       audio);
     gl.uniform2f(this.uCore.screenOffset!, offX, offY);
     gl.uniform2f(this.uCore.resolution!,  this.canvas.width, this.canvas.height);

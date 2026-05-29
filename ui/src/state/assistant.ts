@@ -23,10 +23,11 @@ export const STATE_HINTS: Record<AssistantState, string> = {
   error: "Verifique o servidor e as configurações.",
 };
 
-type Listener = (state: AssistantState, energy: number) => void;
+type Listener = (state: AssistantState, energy: number, dormant: boolean) => void;
 
 let _state: AssistantState = "idle";
 let _energy = 0;
+let _dormant = true;
 const _listeners = new Set<Listener>();
 
 export function getState(): AssistantState {
@@ -35,6 +36,17 @@ export function getState(): AssistantState {
 
 export function getEnergy(): number {
   return _energy;
+}
+
+export function isDormant(): boolean {
+  return _dormant;
+}
+
+/** Thina parada (partículas colapsadas, paleta escura). */
+export function setDormant(dormant: boolean): void {
+  if (_dormant === dormant) return;
+  _dormant = dormant;
+  _notify();
 }
 
 export function setState(state: AssistantState): void {
@@ -49,12 +61,12 @@ export function setEnergy(energy: number): void {
 
 export function subscribe(fn: Listener): () => void {
   _listeners.add(fn);
-  fn(_state, _energy);
+  fn(_state, _energy, _dormant);
   return () => _listeners.delete(fn);
 }
 
 function _notify(): void {
-  for (const fn of _listeners) fn(_state, _energy);
+  for (const fn of _listeners) fn(_state, _energy, _dormant);
 }
 
 /** Índice numérico para o shader WebGL (idle=0 … error=4). */

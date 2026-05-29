@@ -11,6 +11,7 @@ uniform float u_time;
 uniform float u_state;
 uniform float u_energy;
 uniform float u_audio;
+uniform float u_dormant;
 uniform vec2  u_screenOffset;
 
 out float v_alpha;
@@ -30,16 +31,28 @@ vec3 orbit(vec3 p) {
   if (a_kind > 2.5) return p;
   float r = length(p.xz);
   if (r < 0.001) return vec3(0.0, p.y, 0.0);
-  float theta = atan(p.z, p.x) + u_time * (0.038 * (1.0 + 0.20 * u_energy));
+  float spin = 0.038 * (1.0 + 0.20 * u_energy) * (1.0 - u_dormant * 0.94);
+  float theta = atan(p.z, p.x) + u_time * spin;
   return vec3(r * cos(theta), p.y, r * sin(theta));
+}
+
+vec3 collapseToNucleus(vec3 p) {
+  float ang = a_seed * 40.0;
+  vec3 core = vec3(
+    cos(ang) * (0.025 + a_seed * 0.035),
+    (fract(a_seed * 7.13) - 0.5) * 0.03,
+    sin(ang) * (0.025 + a_seed * 0.035)
+  );
+  return mix(p, core, smoothstep(0.0, 1.0, u_dormant));
 }
 
 void main() {
   vec3 p = orbit(a_position);
+  p = collapseToNucleus(p);
   float r = length(p.xz);
 
   // Pulso radial ao falar — envelope suave + onda orgânica por partícula
-  bool isSpeaking = u_state > 2.5 && u_state < 3.5;
+  bool isSpeaking = u_state > 2.5 && u_state < 3.5 && u_dormant < 0.05;
   if (isSpeaking) {
     float radialW = mix(0.45, 1.0, smoothstep(0.05, 0.9, r));
     float envelope = smoothstep(0.08, 0.72, u_audio);
@@ -59,7 +72,7 @@ void main() {
   // Tamanho perspectivo: usa clip.w (profundidade real)
   float depth = max(0.5, clip.w);
   float twinkle = 0.70 + 0.30 * sin(u_time * (2.0 + a_seed * 3.0) + a_seed * 40.0);
-  float vis = 0.55 + 0.45 * u_energy;
+  float vis = mix(0.55 + 0.45 * u_energy, 0.35 + 0.25 * u_energy, u_dormant);
 
   float sz;
   if (a_kind < 0.5) {
@@ -90,8 +103,20 @@ void main() {
   col *= 0.65 + 0.35 * twinkle;
   col = stateTint(col);
 
+  vec3 dHalo = vec3(0.48, 0.24, 0.36);
+  vec3 dCore = vec3(0.78, 0.40, 0.52);
+  vec3 dArm  = vec3(0.52, 0.20, 0.32);
+  vec3 dDust = vec3(0.38, 0.18, 0.28);
+  vec3 colDormant;
+  if (a_kind < 0.5) colDormant = dHalo;
+  else if (a_kind < 1.5) colDormant = mix(dCore, dArm, smoothstep(0.0, 0.32, r));
+  else colDormant = mix(dArm, dDust, smoothstep(0.35, 2.0, r));
+  colDormant *= 0.55 + 0.30 * sin(u_time * 0.45 + a_seed * 12.0);
+  col = mix(col, colDormant, u_dormant);
+
   float fade = 1.0 - smoothstep(1.2, 1.7, r);
   if (a_kind < 0.5) fade = 0.8 * (1.0 - smoothstep(1.3, 1.8, r));
+  fade = mix(fade, 1.0, u_dormant * 0.85);
 
   v_alpha = fade * vis;
   v_color = col;
@@ -126,6 +151,7 @@ uniform float u_time;
 uniform float u_state;
 uniform float u_energy;
 uniform float u_audio;
+uniform float u_dormant;
 uniform vec2  u_screenOffset;
 uniform vec2  u_resolution;
 
@@ -144,7 +170,7 @@ vec3 stateTint(vec3 base) {
 
 void main() {
   bool isIdle = u_state < 0.5;
-  bool isSpeaking = u_state > 2.5 && u_state < 3.5;
+  bool isSpeaking = u_state > 2.5 && u_state < 3.5 && u_dormant < 0.05;
   float breath = 1.0;
   if (isSpeaking) {
     float envelope = smoothstep(0.08, 0.72, u_audio);
@@ -153,9 +179,11 @@ void main() {
     float breathWave = (organic - 0.46) * 1.6;
     breath = 1.0 + (0.06 + 0.10 * envelope) * breathWave;
   } else if (isIdle) {
-    breath = 1.0 + 0.06 * sin(u_time * 0.72);
+    float idleRate = mix(0.72, 0.28, u_dormant);
+    float idleAmp  = mix(0.06, 0.14, u_dormant);
+    breath = 1.0 + idleAmp * sin(u_time * idleRate);
   }
-  float vis = 0.55 + 0.45 * u_energy;
+  float vis = mix(0.55 + 0.45 * u_energy, 0.40 + 0.22 * u_energy, u_dormant);
 
   vec4 clip = u_viewProj * vec4(0.0, 0.0, 0.0, 1.0);
   clip.xy += u_screenOffset * clip.w;
@@ -178,7 +206,8 @@ void main() {
   // mesma paleta do bulbo no centro (kind=1, r≈0)
   float twinkle = 0.70 + 0.30 * sin(u_time * 3.5 + 20.0);
   vec3 coreCol = vec3(1.00, 0.88, 0.58);
-  vec3 col = coreCol;
+  vec3 dormantCore = vec3(0.82, 0.42, 0.55);
+  vec3 col = mix(coreCol, dormantCore, u_dormant);
   col *= 0.65 + 0.35 * twinkle;
   v_color = stateTint(col);
   v_alpha = (0.50 + 0.35 * vis) * (0.80 + 0.12 * u_energy);
@@ -193,6 +222,7 @@ in vec3  v_color;
 in float v_alpha;
 
 uniform float u_state;
+uniform float u_dormant;
 
 out vec4 outColor;
 
@@ -212,6 +242,8 @@ void main() {
 
   // transição para armCol como nas partículas do bulbo/disco interno
   vec3 armCol = mix(vec3(0.45, 0.55, 1.0), vec3(0.72, 0.42, 0.95), 0.5);
+  vec3 armDormant = vec3(0.50, 0.22, 0.34);
+  armCol = mix(armCol, armDormant, u_dormant);
   armCol = stateTint(armCol);
   vec3 col = mix(v_color, armCol, smoothstep(0.25, 0.85, d));
 
@@ -242,6 +274,7 @@ out vec4  outColor;
 uniform float u_time;
 uniform float u_state;
 uniform float u_energy;
+uniform float u_dormant;
 uniform vec2  u_resolution;
 uniform vec2  u_center;   // UV com origem no canto inferior esquerdo
 
@@ -264,30 +297,45 @@ void main() {
   float dist   = length(p);
   float t      = u_time * 0.04;
 
-  // Nebulosa de fundo
+  // Nebulosa de fundo (ativa vs parada)
   vec3 deep    = vec3(0.007, 0.005, 0.020);
   vec3 nebA    = vec3(0.10, 0.05, 0.22);
   vec3 nebB    = vec3(0.04, 0.09, 0.18);
   if (u_state > 1.5 && u_state < 2.5) { nebA = vec3(0.14, 0.04, 0.28); nebB = vec3(0.05, 0.04, 0.22); }
   if (u_state > 3.5)                  { nebA = vec3(0.22, 0.04, 0.08); nebB = vec3(0.10, 0.03, 0.06); }
 
-  float neb = exp(-dist * dist * 2.0) * (0.4 + 0.35 * u_energy)
-            + exp(-dist * 1.3) * 0.12 * sin(u_time * 0.5 + dist * 4.0);
+  vec3 deepD   = vec3(0.014, 0.003, 0.010);
+  vec3 nebAd   = vec3(0.20, 0.05, 0.12);
+  vec3 nebBd   = vec3(0.08, 0.02, 0.06);
+  deep = mix(deep, deepD, u_dormant);
+  nebA = mix(nebA, nebAd, u_dormant);
+  nebB = mix(nebB, nebBd, u_dormant);
+
+  float neb = exp(-dist * dist * 2.0) * (0.4 + 0.35 * u_energy * (1.0 - u_dormant * 0.7))
+            + exp(-dist * 1.3) * 0.12 * sin(u_time * 0.5 + dist * 4.0) * (1.0 - u_dormant * 0.5);
   vec3 col = deep;
   col = mix(col, nebB, neb * 0.6);
   col = mix(col, nebA, neb * neb * 0.7);
 
-  // Estrelas de fundo
-  col += stars(p + vec2(t * 0.02,  t * 0.01),  180.0) * 0.6;
-  col += stars(p - vec2(t * 0.015, t * 0.008), 260.0) * 0.4;
-  col += stars(p + vec2(0.31, 0.17),            420.0) * 0.25;
+  // Estrelas de fundo (mais frias e fracas quando parada)
+  float starMul = mix(1.0, 0.42, u_dormant);
+  vec3 starTint = mix(vec3(1.0), vec3(0.85, 0.55, 0.65), u_dormant);
+  col += stars(p + vec2(t * 0.02,  t * 0.01),  180.0) * 0.6 * starMul * starTint;
+  col += stars(p - vec2(t * 0.015, t * 0.008), 260.0) * 0.4 * starMul * starTint;
+  col += stars(p + vec2(0.31, 0.17),            420.0) * 0.25 * starMul * starTint;
 
   // Brilho suave do núcleo (fundo)
   bool  isIdle = u_state < 0.5;
-  float breath = 1.0 + (isIdle ? 0.10 : 0.04) * sin(u_time * 0.72);
-  col += vec3(1.0, 0.98, 0.88) * exp(-dist*dist*80.0) * breath * (0.14 + 0.10 * u_energy);
-  col += vec3(1.0, 0.82, 0.45) * exp(-dist*dist*28.0) * breath * (0.07 + 0.06 * u_energy);
-  col += vec3(0.5,  0.6, 1.0)  * exp(-dist*dist*10.0) * breath * 0.04;
+  float breathRate = mix(0.72, 0.30, u_dormant);
+  float breathAmp  = mix(isIdle ? 0.10 : 0.04, 0.16, u_dormant);
+  float breath = 1.0 + breathAmp * sin(u_time * breathRate);
+  vec3 glowA = mix(vec3(1.0, 0.98, 0.88), vec3(0.95, 0.55, 0.62), u_dormant);
+  vec3 glowB = mix(vec3(1.0, 0.82, 0.45), vec3(0.72, 0.28, 0.38), u_dormant);
+  vec3 glowC = mix(vec3(0.5, 0.6, 1.0),  vec3(0.45, 0.18, 0.28), u_dormant);
+  float glowStr = mix(1.0, 1.35, u_dormant);
+  col += glowA * exp(-dist*dist*80.0) * breath * (0.14 + 0.10 * u_energy) * glowStr;
+  col += glowB * exp(-dist*dist*28.0) * breath * (0.07 + 0.06 * u_energy) * glowStr;
+  col += glowC * exp(-dist*dist*10.0) * breath * 0.04 * glowStr;
 
   // Vignette
   col *= 1.0 - smoothstep(0.25, 1.35, dist);

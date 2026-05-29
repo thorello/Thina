@@ -1,11 +1,11 @@
 /** Peso suave por estado — u_state contínuo (0–4) interpolado no render loop. */
 const GLSL_STATE = `
 float stateW(float center) {
-  return (1.0 - u_dormant) * (1.0 - smoothstep(0.38, 0.92, abs(u_state - center)));
+  return (1.0 - u_dormant) * (1.0 - smoothstep(0.32, 0.88, abs(u_state - center)));
 }
 
 float stateWAny(float center) {
-  return 1.0 - smoothstep(0.38, 0.92, abs(u_state - center));
+  return 1.0 - smoothstep(0.32, 0.88, abs(u_state - center));
 }
 
 vec3 stateTint(vec3 base) {
@@ -28,7 +28,7 @@ layout(location = 2) in float a_kind;
 
 uniform mat4  u_viewProj;
 uniform float u_time;
-uniform float u_orbitTime;
+uniform float u_orbitAngle;
 uniform float u_state;
 uniform float u_energy;
 uniform float u_audio;
@@ -41,19 +41,12 @@ out vec3  v_color;
 
 ${GLSL_STATE}
 
-// Rotação no plano XZ em torno de (0,0,0) — mesma ω para todas as partículas do disco.
+// Rotação no plano XZ — ângulo integrado no CPU (evita «desgirar» ao mudar ω).
 vec3 orbit(vec3 p) {
   if (a_kind > 2.5) return p;
   float r = length(p.xz);
   if (r < 0.001) return vec3(0.0, p.y, 0.0);
-  float wThink = stateW(2.0);
-  float wSpeak = stateW(3.0);
-  float wListen = stateW(1.0);
-  float thinkBoost = 1.0 + wThink * 1.2;
-  float speakBoost = 1.0 + wSpeak * u_audio * 0.75;
-  float listenBoost = 1.0 + wListen * u_audio * 0.62;
-  float spin = 0.038 * (1.0 + 0.20 * u_energy) * (1.0 - u_dormant * 0.94) * thinkBoost * speakBoost * listenBoost;
-  float theta = atan(p.z, p.x) + u_orbitTime * spin;
+  float theta = atan(p.z, p.x) + u_orbitAngle;
   return vec3(r * cos(theta), p.y, r * sin(theta));
 }
 
@@ -64,7 +57,7 @@ vec3 collapseToNucleus(vec3 p) {
     (fract(a_seed * 7.13) - 0.5) * 0.03,
     sin(ang) * (0.025 + a_seed * 0.035)
   );
-  return mix(p, core, smoothstep(0.0, 1.0, u_dormant));
+  return mix(p, core, smoothstep(0.08, 0.92, u_dormant));
 }
 
 void main() {

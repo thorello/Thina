@@ -13,13 +13,13 @@ import {
 /** Peso 0–1 do estado `center` quando o índice é contínuo. */
 function blendWeight(state: number, center: number): number {
   const d = Math.abs(state - center);
-  if (d >= 0.92) return 0;
-  const x = 1 - d / 0.92;
+  if (d >= 0.88) return 0;
+  const x = 1 - d / 0.88;
   return x * x * (3 - 2 * x);
 }
 
-/** ~450 ms para cruzar entre estados adjacentes. */
-const STATE_BLEND_SPEED = 2.8;
+/** ~650 ms para cruzar entre estados adjacentes. */
+const STATE_BLEND_SPEED = 1.85;
 
 const DISK_COUNT  = 700;
 const GALAXY_RADIUS = 1;
@@ -62,8 +62,10 @@ export class OrbRenderer {
   private prevDrawMs = 0;
   /** Tempo de simulação (s); avança só em draw(), não usa relógio absoluto do rAF. */
   private time = 0;
-  /** Fase orbital do disco; congela em dormant e zera ao reativar. */
-  private orbitTime = 0;
+  /** Ângulo orbital acumulado (rad); integrado no CPU para não «desgirar» ao mudar spin. */
+  private orbitAngle = 0;
+  /** Velocidade angular suavizada (rad/s). */
+  private orbitSpinSmooth = 0.038;
   private raf   = 0;
   private paused = false;
   private unsub = () => {};
@@ -81,11 +83,9 @@ export class OrbRenderer {
     this.vao = this.buildGalaxy();
     this.coreVao = this.buildCoreVao();
     this.unsub = subscribe((s, e, dormant) => {
-      const waking = this.dormantTarget >= 0.5 && !dormant;
       this.stateTarget = stateIndex(s);
       this.energy = e;
       this.dormantTarget = dormant ? 1 : 0;
-      if (waking) this.orbitTime = 0;
     });
     this.resize();
     window.addEventListener("resize", this.onResize);
@@ -118,7 +118,7 @@ export class OrbRenderer {
     this.uPart = {
       viewProj:     gl.getUniformLocation(this.particleProg, "u_viewProj"),
       time:         gl.getUniformLocation(this.particleProg, "u_time"),
-      orbitTime:    gl.getUniformLocation(this.particleProg, "u_orbitTime"),
+      orbitAngle:   gl.getUniformLocation(this.particleProg, "u_orbitAngle"),
       state:        gl.getUniformLocation(this.particleProg, "u_state"),
       energy:       gl.getUniformLocation(this.particleProg, "u_energy"),
       dormant:      gl.getUniformLocation(this.particleProg, "u_dormant"),
@@ -294,15 +294,32 @@ export class OrbRenderer {
 
     const wAudioReact = Math.min(1, wSpeaking + wListening * 0.92);
     const audioTarget = this.energy * wAudioReact;
-    const smoothK = audioTarget > this.audioSmooth ? 16 : 3.6;
+    const smoothK = audioTarget > this.audioSmooth ? 14 : 2.2;
     this.audioSmooth += (audioTarget - this.audioSmooth) * (1 - Math.exp(-smoothK * dt));
 
-    const dormantK = 1 - Math.exp(-3.2 * dt);
+    const dormantK = 1 - Math.exp(-2.4 * dt);
     this.dormantSmooth +=
       (this.dormantTarget - this.dormantSmooth) * dormantK;
     const dormant = this.dormantSmooth;
     const alive = 1.0 - dormant;
-    if (alive > 0.01) this.orbitTime += dt;
+
+    const orbitThinkBoost = 1.0 + wThinking * 1.2;
+    const orbitSpeakBoost = 1.0 + wSpeaking * this.audioSmooth * 0.75;
+    const orbitListenBoost = 1.0 + wListening * this.audioSmooth * 0.62;
+    const orbitSpinTarget =
+      0.038 *
+      (1.0 + 0.20 * (0.50 + this.audioSmooth * 0.5)) *
+      (1.0 - dormant * 0.94) *
+      orbitThinkBoost *
+      orbitSpeakBoost *
+      orbitListenBoost;
+    const spinK = 1 - Math.exp(-4.5 * dt);
+    this.orbitSpinSmooth +=
+      (orbitSpinTarget - this.orbitSpinSmooth) * spinK;
+    if (alive > 0.005) {
+      this.orbitAngle += dt * this.orbitSpinSmooth * alive;
+    }
+
     const breath = alive * Math.sin(this.time * BREATH_OMEGA);
 
     const idleBreath = (1 - wActiveMotion) * breath * 0.14;
@@ -340,7 +357,7 @@ export class OrbRenderer {
     gl.useProgram(this.particleProg);
     gl.uniformMatrix4fv(this.uPart.viewProj!,     false, this.viewProj);
     gl.uniform1f(this.uPart.time!,        this.time);
-    gl.uniform1f(this.uPart.orbitTime!,  this.orbitTime);
+    gl.uniform1f(this.uPart.orbitAngle!, this.orbitAngle);
     gl.uniform1f(this.uPart.state!,       state);
     gl.uniform1f(this.uPart.energy!,      energy);
     gl.uniform1f(this.uPart.dormant!,     dormant);

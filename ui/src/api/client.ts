@@ -35,7 +35,7 @@ const DEFAULT_SETTINGS: UiSettings = {
   apiBase: "",
   areaId: "sala",
   autoPlayAudio: true,
-  wakeWordEnabled: false,
+  wakeWordEnabled: true,
 };
 
 const LEGACY_DEV_BASES = [
@@ -131,6 +131,7 @@ export async function conversar(
   texto: string,
   sessionId: string | null,
   novaSessao: boolean,
+  signal?: AbortSignal,
 ): Promise<ConversarResult> {
   const body: Record<string, unknown> = {
     texto,
@@ -145,6 +146,7 @@ export async function conversar(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!res.ok) {

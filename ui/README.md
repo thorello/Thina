@@ -30,7 +30,8 @@ Reinicie o servidor Thina e acesse `http://127.0.0.1:8080/` (redireciona para `/
 
 | Ação | Efeito |
 |------|--------|
-| **Ativar Thina (Tina)** | Nova sessão (`nova_sessao: true`) e liga o microfone para «Tina» |
+| **Ativar / Parar Thina** | Alterna escuta, sessão e pedido em curso |
+| **Microfone ao abrir** | Ativa a Thina automaticamente quando o servidor responde |
 | **Manter conversa ativa** | Reutiliza `session_id` nos envios seguintes |
 | **Enviar** | Chama `/v1/conversar` com o `area_id` configurado |
 

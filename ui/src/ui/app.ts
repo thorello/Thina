@@ -22,6 +22,7 @@ import {
 } from "../speech/wake";
 import {
   getState,
+  setDormant,
   setEnergy,
   setState,
   STATE_HINTS,
@@ -49,7 +50,9 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   let health: HealthInfo | null = null;
   let stopSpeakAnim: (() => void) | null = null;
   let stopWakePulseAnim: (() => void) | null = null;
+  let conversarAbort: AbortController | null = null;
   let pendingWake = false;
+  let thinaActive = false;
   let micActive = false;
   /** Só mostra transcrição / placeholder de voz após «Tina» nesta escuta. */
   let micWakeUnlocked = false;
@@ -112,8 +115,9 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
       <section class="panel">
         <h2>Comandos</h2>
         <div class="cmd-grid">
-          <button type="button" class="btn btn-wake" id="btn-wake" title="Como dizer Tina de novo">
-            <span class="btn-icon">✦</span> Ativar Thina (Tina)
+          <button type="button" class="btn btn-wake" id="btn-toggle-thina" title="Liga ou desliga a Thina (microfone e sessão)">
+            <span class="btn-icon" id="btn-toggle-icon">✦</span>
+            <span id="btn-toggle-label">Ativar Thina</span>
           </button>
           <button type="button" class="btn" id="btn-keep" title="Manter session_id e histórico">
             <span class="btn-icon">◎</span> Manter conversa ativa
@@ -126,15 +130,15 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
           </button>
         </div>
         <ul class="hint-list">
-          <li><strong>Ouvir «Tina»</strong> — microfone (Chrome/Edge). <strong>Esc</strong> para parar tudo.</li>
-          <li><strong>Ativar</strong> — nova sessão e liga o microfone para ouvir «Tina».</li>
+          <li>A Thina liga o microfone ao abrir o painel (Chrome/Edge). Diga «Tina» e o pedido.</li>
+          <li><strong>Ativar / Parar Thina</strong> alterna o estado; <strong>Esc</strong> para parar tudo de emergência.</li>
           <li>No <strong>ReSpeaker</strong>, a ativação é pelo Home Assistant, não por esta página.</li>
         </ul>
       </section>
 
       <section class="panel mic-panel" id="mic-panel">
         <h2>Microfone <span class="mic-live-dot" id="mic-live-dot" hidden></span></h2>
-        <p class="mic-status" id="mic-status">Clique em «Ouvir Tina» para começar.</p>
+        <p class="mic-status" id="mic-status">A ligar microfone…</p>
         <div class="mic-transcript" id="mic-transcript" aria-live="polite">
           <span class="mic-transcript-muted">Após «Tina», o que disser aparece aqui…</span>
         </div>
@@ -208,7 +212,9 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   const areaSelect = $("#area-id", root) as HTMLSelectElement;
   const autoPlayCheck = $("#auto-play", root) as HTMLInputElement;
   const healthGrid = $("#health-grid", root);
-  const btnWake = $("#btn-wake", root) as HTMLButtonElement;
+  const btnToggleThina = $("#btn-toggle-thina", root) as HTMLButtonElement;
+  const btnToggleIcon = $("#btn-toggle-icon", root);
+  const btnToggleLabel = $("#btn-toggle-label", root);
   const btnKeep = $("#btn-keep", root) as HTMLButtonElement;
   const btnHealth = $("#btn-health", root) as HTMLButtonElement;
   const btnSend = $("#btn-send", root) as HTMLButtonElement;
@@ -241,7 +247,14 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     quickCmds.appendChild(b);
   });
 
-  subscribe((state) => {
+  subscribe((state, _energy, dormant) => {
+    if (dormant) {
+      statusPill.dataset.state = "dormant";
+      statusLabel.textContent = "Parada";
+      orbHint.innerHTML =
+        "<p>Clique em <strong>Ativar Thina</strong> para acordar a galáxia.</p>";
+      return;
+    }
     statusPill.dataset.state = state;
     statusLabel.textContent = STATE_LABELS[state];
     orbHint.innerHTML = `<p>${STATE_HINTS[state]}</p>`;
@@ -330,23 +343,44 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     chatInput.placeholder = "Fale com a Thina por texto…";
   }
 
-  function stopMic(): void {
+  function updateThinaToggleUi(): void {
+    if (thinaActive) {
+      btnToggleThina.classList.remove("btn-wake");
+      btnToggleThina.classList.add("btn-stop");
+      btnToggleIcon.textContent = "■";
+      btnToggleLabel.textContent = "Parar Thina";
+      btnToggleThina.title = "Interrompe áudio, pedido em curso e microfone";
+    } else {
+      btnToggleThina.classList.remove("btn-stop");
+      btnToggleThina.classList.add("btn-wake");
+      btnToggleIcon.textContent = "✦";
+      btnToggleLabel.textContent = "Ativar Thina";
+      btnToggleThina.title = "Nova sessão e liga o microfone para «Tina»";
+    }
+  }
+
+  function stopMic(quiet = false): void {
     if (!micActive) return;
     wakeListener.stop();
     micActive = false;
+    thinaActive = false;
+    setDormant(true);
+    updateThinaToggleUi();
     resetVoiceInputPreview();
     btnMicLabel.textContent = "Ouvir «Tina»";
     btnMic.classList.remove("btn-wake");
     updateMicPhase("off");
     setMicStatus("Microfone desligado.");
     setState("idle");
-    pushChat("system", "Microfone desligado.");
+    if (!quiet) pushChat("system", "Microfone desligado.");
   }
 
   /** Liga escuta contínua da palavra «Tina». Retorna false se o browser não suportar. */
-  function startMic(): boolean {
+  function startMic(opts?: { quiet?: boolean }): boolean {
     if (!isSpeechRecognitionSupported()) {
-      pushChat("system", "Microfone por voz: use Chrome ou Edge.");
+      if (!opts?.quiet) {
+        pushChat("system", "Microfone por voz: use Chrome ou Edge.");
+      }
       return false;
     }
     if (micActive) return true;
@@ -358,11 +392,19 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     setMicWakeHit(false);
     wakeListener.start();
     micActive = true;
+    thinaActive = true;
+    setDormant(false);
+    updateThinaToggleUi();
     btnMicLabel.textContent = "Parar de ouvir";
     btnMic.classList.add("btn-wake");
     updateMicPhase("waiting_wake");
     setMicStatus("A pedir acesso ao microfone…");
-    pushChat("system", "Aguardando «Tina»… Abra F12 e filtre «Thina Mic» se nada aparecer.");
+    if (!opts?.quiet) {
+      pushChat(
+        "system",
+        "Aguardando «Tina»… Abra F12 e filtre «Thina Mic» se nada aparecer.",
+      );
+    }
     setState("idle");
     return true;
   }
@@ -409,9 +451,72 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
 
   function setBusy(busy: boolean): void {
     btnSend.disabled = busy;
-    btnWake.disabled = busy;
+    btnToggleThina.disabled = false;
     if (!micActive) btnMic.disabled = busy;
     chatInput.disabled = busy;
+  }
+
+  /** Interrompe pedido, áudio, animação e microfone. */
+  function stopThina(notify = true): void {
+    conversarAbort?.abort();
+    conversarAbort = null;
+    stopSpeakAnim?.();
+    stopSpeakAnim = null;
+    stopWakePulseAnim?.();
+    stopWakePulseAnim = null;
+    stopResponseAudio();
+    setEnergy(0);
+    if (micActive) stopMic(true);
+    else {
+      thinaActive = false;
+      setDormant(true);
+      updateThinaToggleUi();
+    }
+    setBusy(false);
+    setState("idle");
+    sessionId = null;
+    pendingWake = false;
+    resetVoiceInputPreview();
+    if (notify) {
+      pushChat("system", "Thina parada.");
+      setMicStatus("Parada — clique em «Ativar Thina» para voltar.");
+    }
+  }
+
+  function activateThina(): void {
+    sessionId = null;
+    pendingWake = true;
+    unlockResponseAudio();
+    const micOk = startMic({ quiet: true });
+    if (!micOk) {
+      thinaActive = false;
+      setDormant(true);
+      updateThinaToggleUi();
+      pushChat(
+        "system",
+        "Não foi possível ligar o microfone — use Chrome ou Edge.",
+      );
+      return;
+    }
+    setDormant(false);
+    pushChat("system", "Thina ativa — diga «Tina» e o pedido.");
+    setState("idle");
+    chatInput.focus();
+    chatInput.placeholder = "Ou fale: «Tina», depois o pedido…";
+  }
+
+  function toggleThina(): void {
+    if (thinaActive) stopThina();
+    else activateThina();
+  }
+
+  function tryAutoStartMic(): void {
+    if (!settings.wakeWordEnabled || micActive) return;
+    if (!isSpeechRecognitionSupported()) {
+      setMicStatus("Microfone indisponível — use Chrome ou Edge.");
+      return;
+    }
+    startMic();
   }
 
   async function refreshAreas(): Promise<void> {
@@ -482,8 +587,18 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     await new Promise((r) => setTimeout(r, 200));
     setState("thinking");
 
+    conversarAbort?.abort();
+    conversarAbort = new AbortController();
+    const { signal } = conversarAbort;
+
     try {
-      const result = await conversar(settings, trimmed, sessionId, novaSessao);
+      const result = await conversar(
+        settings,
+        trimmed,
+        sessionId,
+        novaSessao,
+        signal,
+      );
       sessionId = result.session_id;
       pendingWake = false;
       setState("speaking");
@@ -526,30 +641,20 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
         }, 1200);
       }
     } catch (e) {
+      if ((e as Error).name === "AbortError") {
+        setState("idle");
+        return;
+      }
       setState("error");
       pushChat("system", (e as Error).message);
       setTimeout(() => setState("idle"), 2500);
     } finally {
+      conversarAbort = null;
       setBusy(false);
     }
   }
 
-  btnWake.addEventListener("click", () => {
-    sessionId = null;
-    pendingWake = true;
-    const micOk = startMic();
-    pushChat(
-      "system",
-      micOk
-        ? "Nova sessão — microfone ligado. Diga «Tina» e o pedido."
-        : "Nova sessão — digite o pedido ou use «Ouvir Tina» (Chrome/Edge).",
-    );
-    setState("idle");
-    chatInput.focus();
-    chatInput.placeholder = micOk
-      ? "Ou fale: «Tina», depois o pedido…"
-      : 'Diga seu pedido após "Tina"…';
-  });
+  btnToggleThina.addEventListener("click", () => toggleThina());
 
   btnKeep.addEventListener("click", () => {
     pushChat(
@@ -590,18 +695,21 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   });
 
   applySettingsToForm();
+  updateThinaToggleUi();
   renderChat();
-  void refreshAreas().then(() => checkHealth());
+  void refreshAreas().then(async () => {
+    await checkHealth();
+    tryAutoStartMic();
+  });
 
   pushChat(
     "system",
-    "Painel pronto. Clique em «Ouvir Tina» ou digite abaixo. Reinicie o servidor Thina se /v1/areas falhar.",
+    "Painel pronto. O microfone liga automaticamente — diga «Tina» ou use o texto abaixo.",
   );
 
   return {
     emergencyStop: () => {
-      if (micActive) stopMic();
-      stopResponseAudio();
+      stopThina(false);
       setMicStatus("Parado (Esc / emergência)");
       micLog.warn("Parada de emergência");
     },

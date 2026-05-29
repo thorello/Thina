@@ -15,10 +15,11 @@ import {
   stopResponseAudio,
   unlockResponseAudio,
 } from "../speech/response-audio";
-import { micLog, subscribeMicLogUi, type MicLogEntry } from "../speech/log";
+import { micLog } from "../speech/log";
 import { startMicLevel, stopMicLevel, type MicLevelFrame } from "../speech/mic-level";
 import {
   isSpeechRecognitionSupported,
+  stripWakePrefix,
   WakeListener,
 } from "../speech/wake";
 import {
@@ -56,19 +57,27 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   let pendingWake = false;
   let thinaActive = false;
   let micActive = false;
-  /** Só mostra transcrição / placeholder de voz após «Tina» nesta escuta. */
+  /** Só mostra transcrição após «Tina» nesta escuta. */
   let micWakeUnlocked = false;
+  let micStatusHint = "A ligar microfone…";
+  let lastVoiceText = "";
   let suppressMicEnergyUntil = 0;
 
+  /** Animação de onda no card — sempre que o microfone estiver ligado. */
+  function isMicVizActive(): boolean {
+    return micActive && wakeListener.getPhase() !== "off";
+  }
+
   function isMicListeningVisual(): boolean {
-    if (!micActive || wakeListener.getPhase() === "off") return false;
+    if (!isMicVizActive()) return false;
     const st = getState();
     return st !== "thinking" && st !== "speaking" && st !== "error";
   }
 
   function onMicFrame(frame: MicLevelFrame): void {
+    micVisualizer.update(frame.waveform, isMicVizActive());
+
     const listening = isMicListeningVisual();
-    micVisualizer.update(frame.waveform, listening);
     if (listening) {
       micPanelEl.classList.toggle("mic-panel--listening", frame.energy > 0.06);
       micPanelEl.style.setProperty("--mic-energy", String(frame.energy));
@@ -107,7 +116,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
       if (!micWakeUnlocked && wakeListener.getPhase() === "waiting_wake") {
         return;
       }
-      setMicTranscript(text, meta?.wake ?? false);
+      setMicTranscript(text);
       if (
         micWakeUnlocked &&
         (getState() === "idle" || getState() === "listening")
@@ -155,22 +164,24 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
       </section>
 
       <section class="panel mic-panel" id="mic-panel">
-        <h2>Microfone <span class="mic-live-dot" id="mic-live-dot" hidden></span></h2>
-        <p class="mic-status" id="mic-status">A ligar microfone…</p>
+        <div class="mic-panel-head">
+          <h2>Microfone <span class="mic-live-dot" id="mic-live-dot" hidden></span></h2>
+        </div>
         <div class="mic-listen-viz" id="mic-listen-viz" hidden>
           <div class="mic-wave-wrap">
             <canvas class="mic-wave-canvas" id="mic-wave-canvas" aria-hidden="true"></canvas>
           </div>
-          <p class="mic-listen-label" id="mic-listen-label">Ouvindo</p>
+          <p class="mic-listen-label" id="mic-listen-label">Aguardando «Tina»…</p>
         </div>
-        <div class="mic-transcript" id="mic-transcript" aria-live="polite">
-          <span class="mic-transcript-muted">Após «Tina», o que disser aparece aqui…</span>
-        </div>
-        <p class="mic-wake-flag" id="mic-wake-flag" hidden>✦ «Tina» reconhecida</p>
-        <details class="mic-log-details" open>
-          <summary>Log (também no Console F12 → filtre «Thina Mic»)</summary>
-          <pre class="mic-log-view" id="mic-log-view"></pre>
-        </details>
+        <div
+          class="mic-speech-area"
+          id="mic-speech-area"
+          role="textbox"
+          aria-readonly="true"
+          aria-multiline="true"
+          aria-live="polite"
+          data-state="idle"
+        ></div>
       </section>
     </aside>
 
@@ -258,10 +269,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   const settingsPopover = $("#settings-popover", root);
   const wakeEnabledCheck = $("#wake-enabled", root) as HTMLInputElement;
   const micPanelEl = $("#mic-panel", root);
-  const micStatusEl = $("#mic-status", root);
-  const micTranscriptEl = $("#mic-transcript", root);
-  const micWakeFlagEl = $("#mic-wake-flag", root);
-  const micLogViewEl = $("#mic-log-view", root);
+  const micSpeechAreaEl = $("#mic-speech-area", root);
   const micLiveDotEl = $("#mic-live-dot", root);
   const micListenVizEl = $("#mic-listen-viz", root);
   const micWaveCanvas = $("#mic-wave-canvas", root) as HTMLCanvasElement;
@@ -306,51 +314,49 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     orbHint.innerHTML = `<p>${STATE_HINTS[state]}</p>`;
   });
 
-  function appendMicLogLine(entry: MicLogEntry): void {
-    const line = `[${entry.time}] ${entry.level.toUpperCase()} ${entry.message}`;
-    const extra = entry.data ? ` ${JSON.stringify(entry.data)}` : "";
-    const row = document.createElement("div");
-    row.className = `mic-log-line mic-log-${entry.level}`;
-    row.textContent = line + extra;
-    micLogViewEl.appendChild(row);
-    while (micLogViewEl.childNodes.length > 40) {
-      micLogViewEl.removeChild(micLogViewEl.firstChild!);
-    }
-    micLogViewEl.scrollTop = micLogViewEl.scrollHeight;
-  }
-
-  subscribeMicLogUi(appendMicLogLine);
-
   function setMicStatus(text: string): void {
-    micStatusEl.textContent = text;
+    micStatusHint = text;
+    if (!micWakeUnlocked) renderMicSpeechArea();
   }
 
-  function setMicTranscript(text: string, wake: boolean): void {
-    micTranscriptEl.innerHTML = "";
-    if (!text.trim()) {
-      const muted = document.createElement("span");
-      muted.className = "mic-transcript-muted";
-      muted.textContent = "Após «Tina», o que disser aparece aqui…";
-      micTranscriptEl.appendChild(muted);
+  function setMicTranscript(raw: string): void {
+    lastVoiceText = raw;
+    if (!micWakeUnlocked) return;
+    renderMicSpeechArea();
+  }
+
+  function renderMicSpeechArea(): void {
+    micSpeechAreaEl.dataset.state = micWakeUnlocked ? "listening" : "idle";
+
+    if (micWakeUnlocked) {
+      const display = stripWakePrefix(lastVoiceText).trim();
+      if (!display) {
+        micSpeechAreaEl.innerHTML =
+          '<span class="mic-speech-placeholder">A ouvir o seu pedido…</span>';
+      } else {
+        micSpeechAreaEl.textContent = display;
+      }
+      micSpeechAreaEl.scrollTop = micSpeechAreaEl.scrollHeight;
       return;
     }
-    const span = document.createElement("span");
-    span.textContent = text;
-    if (wake) span.className = "mic-transcript-wake";
-    micTranscriptEl.appendChild(span);
+
+    const hint = micStatusHint.trim() || "Aguardando «Tina»…";
+    micSpeechAreaEl.innerHTML = `<span class="mic-speech-placeholder">${escapeHtml(hint)}</span>`;
   }
 
-  function setMicWakeHit(on: boolean): void {
-    micWakeFlagEl.hidden = !on;
-    micWakeFlagEl.classList.toggle("mic-wake-flag--on", on);
+  function resetMicSpeechArea(): void {
+    lastVoiceText = "";
+    micWakeUnlocked = false;
+    micSpeechAreaEl.dataset.state = "idle";
+    renderMicSpeechArea();
   }
 
   /** Som, vibração, orb e destaque visual ao reconhecer «Tina». */
   function showWakeFeedback(): void {
     if (!playWakeFeedback()) return;
 
-    setMicWakeHit(true);
-    setMicStatus("✦ «Tina» — pode falar o pedido");
+    setMicStatus("«Tina» — pode falar o pedido");
+    renderMicSpeechArea();
     micPanelEl.classList.remove("mic-panel--wake");
     void micPanelEl.offsetWidth;
     micPanelEl.classList.add("mic-panel--wake");
@@ -371,16 +377,20 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   function updateMicPhase(phase: string): void {
     micLiveDotEl.hidden = phase === "off";
     if (phase === "off") {
-      setMicWakeHit(false);
       micVisualizer.reset();
       micPanelEl.classList.remove("mic-panel--listening");
       micPanelEl.style.setProperty("--mic-energy", "0");
       return;
     }
+    micVisualizer.update(new Float32Array(0), true);
     if (phase === "waiting_wake") {
-      micListenLabelEl.textContent = "Aguardando «Tina»…";
+      micListenLabelEl.textContent = micWakeUnlocked
+        ? "A ouvir o pedido…"
+        : "Aguardando «Tina»…";
+      if (!micWakeUnlocked) setMicStatus("Aguardando «Tina»…");
     } else if (phase === "waiting_command") {
-      micListenLabelEl.textContent = "Ouvindo o pedido…";
+      micListenLabelEl.textContent = "A ouvir o pedido…";
+      setMicStatus("A ouvir o pedido…");
     }
   }
 
@@ -392,8 +402,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   }
 
   function resetVoiceInputPreview(): void {
-    micWakeUnlocked = false;
-    setMicTranscript("", false);
+    resetMicSpeechArea();
     chatInput.placeholder = "Fale com a Thina por texto…";
   }
 
@@ -443,9 +452,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     unlockWakeFeedback();
     unlockResponseAudio();
     micLog.clearHistory();
-    micLogViewEl.textContent = "";
     resetVoiceInputPreview();
-    setMicWakeHit(false);
     wakeListener.start();
     void startMicLevel(onMicFrame).catch((err) => {
       micLog.warn("Analisador de microfone indisponível", {
@@ -458,6 +465,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     updateThinaToggleUi();
     updateMicPhase("waiting_wake");
     setMicStatus(opts?.quiet ? "A pedir acesso ao microfone…" : "Aguardando «Tina»…");
+    micVisualizer.update(new Float32Array(0), true);
     setState("idle");
     return true;
   }
@@ -742,6 +750,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
 
   applySettingsToForm();
   updateThinaToggleUi();
+  renderMicSpeechArea();
   renderChat();
   void refreshAreas().then(async () => {
     await checkHealth();
@@ -761,4 +770,12 @@ function $(id: string, root: ParentNode): HTMLElement {
   const el = root.querySelector(id);
   if (!el) throw new Error(`Elemento ${id} não encontrado`);
   return el as HTMLElement;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

@@ -28,6 +28,7 @@ htmlcov/
 # Dados de execução (áudio TTS, PIDs, logs de serviços)
 data/audio/*
 !data/audio/.gitkeep
+data/tts_settings.json
 data/run/*
 !data/run/.gitkeep
 data/homeassistant/*

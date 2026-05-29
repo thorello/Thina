@@ -5,10 +5,21 @@ export interface HealthInfo {
   llm_model: string;
   kokoro_voice: string;
   kokoro_speed: string;
+  kokoro_mix_voice?: string;
+  kokoro_mix_amount?: string;
   kokoro_sentiment: string;
   areas?: string[];
   ha_ok?: boolean;
   ha_url?: string;
+}
+
+export interface TtsSettings {
+  voice: string;
+  mix_voice: string | null;
+  mix_amount: number;
+  speed: number;
+  sentiment: string;
+  voices: string[];
 }
 
 export interface ConversarResult {
@@ -103,6 +114,39 @@ export async function fetchHealth(settings: UiSettings): Promise<HealthInfo> {
   const res = await fetch(apiUrl(settings, "/health"));
   if (!res.ok) throw new Error(`Health ${res.status}`);
   return res.json() as Promise<HealthInfo>;
+}
+
+export async function fetchTtsSettings(settings: UiSettings): Promise<TtsSettings> {
+  const res = await fetch(apiUrl(settings, "/v1/tts/settings"));
+  if (!res.ok) throw new Error(`TTS settings ${res.status}`);
+  return res.json() as Promise<TtsSettings>;
+}
+
+export async function saveTtsSettings(
+  settings: UiSettings,
+  tts: Pick<TtsSettings, "voice" | "mix_voice" | "mix_amount" | "speed">,
+): Promise<TtsSettings> {
+  const res = await fetch(apiUrl(settings, "/v1/tts/settings"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      voice: tts.voice,
+      mix_voice: tts.mix_voice || null,
+      mix_amount: tts.mix_amount,
+      speed: tts.speed,
+    }),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const err = (await res.json()) as { detail?: string };
+      if (err.detail) detail = err.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<TtsSettings>;
 }
 
 export async function fetchAreas(settings: UiSettings): Promise<string[]> {

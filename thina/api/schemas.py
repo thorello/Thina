@@ -30,3 +30,19 @@ class ConversarResponse(BaseModel):
     area_id: str
     media_player: str
     session_id: str
+
+
+class TtsSettingsResponse(BaseModel):
+    voice: str
+    mix_voice: str | None
+    mix_amount: float
+    speed: float
+    sentiment: str
+    voices: list[str]
+
+
+class TtsSettingsUpdate(BaseModel):
+    voice: str = Field(..., min_length=1, description="Voz principal Kokoro")
+    mix_voice: str | None = Field(None, description="Segunda voz para mistura")
+    mix_amount: float = Field(0.0, ge=0.0, le=1.0, description="Proporção da 2ª voz (0–1)")
+    speed: float = Field(1.0, ge=0.5, le=2.0, description="Velocidade da fala")

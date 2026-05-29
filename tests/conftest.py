@@ -34,6 +34,15 @@ def _reset_pc_apps_catalog() -> Iterator[None]:
     pc_actions.reload_pc_apps_catalog()
 
 
+@pytest.fixture(autouse=True)
+def _reset_tts_settings_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    import thina.core.tts_settings as tts_store
+
+    tts_file = tmp_path / "tts_settings.json"
+    monkeypatch.setattr(tts_store, "TTS_SETTINGS_FILE", tts_file)
+    yield
+
+
 @pytest.fixture
 def areas_map_file(tmp_path: Path) -> Path:
     path = tmp_path / "areas.json"

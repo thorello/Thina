@@ -2,10 +2,13 @@ import {
   conversar,
   fetchAreas,
   fetchHealth,
+  fetchTtsSettings,
   loadSettings,
   resolveAudioUrl,
   saveSettings,
+  saveTtsSettings,
   type HealthInfo,
+  type TtsSettings,
   type UiSettings,
 } from "../api/client";
 import { animateSpeakingEnergy } from "../gl/orb";
@@ -51,6 +54,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   let sessionId: string | null = null;
   let areas: string[] = ["sala", "quarto", "cozinha"];
   let health: HealthInfo | null = null;
+  let ttsSettings: TtsSettings | null = null;
   let stopSpeakAnim: (() => void) | null = null;
   let stopWakePulseAnim: (() => void) | null = null;
   let conversarAbort: AbortController | null = null;
@@ -141,9 +145,24 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
           <p>Assistente de voz residencial · IA + casa inteligente</p>
         </div>
       </div>
-      <div class="status-pill" data-state="idle" id="status-pill">
-        <span class="status-dot"></span>
-        <span id="status-label">${STATE_LABELS.idle}</span>
+      <div class="header-actions">
+        <div class="status-pill" data-state="idle" id="status-pill">
+          <span class="status-dot"></span>
+          <span id="status-label">${STATE_LABELS.idle}</span>
+        </div>
+        <button
+          type="button"
+          class="btn btn-gear"
+          id="btn-settings"
+          aria-label="Configurações"
+          aria-expanded="false"
+          aria-controls="settings-modal"
+          title="Configurações"
+        >
+          <svg class="gear-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -193,50 +212,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
 
     <aside class="right-col">
       <section class="panel panel-chat">
-        <div class="panel-head">
-          <h2>Conversa</h2>
-          <div class="settings-menu">
-            <button
-              type="button"
-              class="btn btn-gear"
-              id="btn-settings"
-              aria-label="Configurações"
-              aria-expanded="false"
-              aria-controls="settings-popover"
-              title="Configurações"
-            >
-              <svg class="gear-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                <path fill="currentColor" d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
-              </svg>
-            </button>
-            <div class="settings-popover" id="settings-popover" hidden>
-              <form class="settings-form" id="settings-form">
-                <div class="field">
-                  <label for="api-base">URL do servidor Thina</label>
-                  <input type="text" id="api-base" placeholder="(vazio) mesmo host — recomendado no npm run dev" />
-                </div>
-                <div class="field">
-                  <label for="area-id">Cômodo (area_id)</label>
-                  <select id="area-id"></select>
-                </div>
-                <label class="field-check">
-                  <input type="checkbox" id="auto-play" checked />
-                  Reproduzir áudio da resposta no navegador
-                </label>
-                <label class="field-check">
-                  <input type="checkbox" id="wake-enabled" />
-                  Ligar microfone ao abrir o painel
-                </label>
-                <button type="submit" class="btn btn-primary">Salvar configurações</button>
-              </form>
-              <div class="health-grid" id="health-grid" hidden></div>
-              <div class="settings-examples">
-                <h3>Exemplos para a Thina</h3>
-                <div class="cmd-grid" id="quick-cmds"></div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <h2>Conversa</h2>
         <div class="chat-log" id="chat-log"></div>
         <form class="input-row" id="chat-form">
           <input type="text" id="chat-input" placeholder="Fale com a Thina por texto…" autocomplete="off" />
@@ -244,6 +220,79 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
         </form>
       </section>
     </aside>
+
+    <div class="settings-overlay" id="settings-overlay" hidden aria-hidden="true">
+      <div
+        class="settings-modal panel"
+        id="settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+      >
+        <div class="settings-modal-head">
+          <h2 id="settings-title">Configurações</h2>
+          <button
+            type="button"
+            class="btn btn-close"
+            id="btn-settings-close"
+            aria-label="Fechar configurações"
+          >
+            ×
+          </button>
+        </div>
+        <form class="settings-form" id="settings-form">
+          <div class="field">
+            <label for="api-base">URL do servidor Thina</label>
+            <input type="text" id="api-base" placeholder="(vazio) mesmo host — recomendado no npm run dev" />
+          </div>
+          <div class="field">
+            <label for="area-id">Cômodo (area_id)</label>
+            <select id="area-id"></select>
+          </div>
+          <label class="field-check">
+            <input type="checkbox" id="auto-play" checked />
+            Reproduzir áudio da resposta no navegador
+          </label>
+          <label class="field-check">
+            <input type="checkbox" id="wake-enabled" />
+            Ligar microfone ao abrir o painel
+          </label>
+          <fieldset class="settings-voice">
+            <legend>Voz da Thina (Kokoro)</legend>
+            <div class="field">
+              <label for="tts-voice">Voz principal</label>
+              <select id="tts-voice"></select>
+            </div>
+            <div class="field">
+              <label for="tts-mix-voice">Mistura (2ª voz)</label>
+              <select id="tts-mix-voice">
+                <option value="">(nenhuma)</option>
+              </select>
+            </div>
+            <div class="field field-range">
+              <label for="tts-mix-amount">
+                Proporção da mistura
+                <span class="range-value" id="tts-mix-amount-label">0%</span>
+              </label>
+              <input type="range" id="tts-mix-amount" min="0" max="100" step="5" value="0" />
+            </div>
+            <div class="field field-range">
+              <label for="tts-speed">
+                Velocidade
+                <span class="range-value" id="tts-speed-label">1.0×</span>
+              </label>
+              <input type="range" id="tts-speed" min="50" max="200" step="5" value="100" />
+            </div>
+          </fieldset>
+          <button type="submit" class="btn btn-primary">Salvar configurações</button>
+        </form>
+        <div class="health-grid" id="health-grid" hidden></div>
+        <div class="settings-examples">
+          <h3>Exemplos para a Thina</h3>
+          <div class="cmd-grid" id="quick-cmds"></div>
+        </div>
+      </div>
+    </div>
 
     <footer class="footer-bar">
       Interface WebGL · galáxia 3D sincronizada com LLM, Kokoro e Home Assistant
@@ -266,8 +315,15 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   const btnToggleLabel = $("#btn-toggle-label", root);
   const btnSend = $("#btn-send", root) as HTMLButtonElement;
   const btnSettings = $("#btn-settings", root) as HTMLButtonElement;
-  const settingsPopover = $("#settings-popover", root);
+  const btnSettingsClose = $("#btn-settings-close", root) as HTMLButtonElement;
+  const settingsOverlay = $("#settings-overlay", root);
   const wakeEnabledCheck = $("#wake-enabled", root) as HTMLInputElement;
+  const ttsVoiceSelect = $("#tts-voice", root) as HTMLSelectElement;
+  const ttsMixVoiceSelect = $("#tts-mix-voice", root) as HTMLSelectElement;
+  const ttsMixAmountInput = $("#tts-mix-amount", root) as HTMLInputElement;
+  const ttsMixAmountLabel = $("#tts-mix-amount-label", root);
+  const ttsSpeedInput = $("#tts-speed", root) as HTMLInputElement;
+  const ttsSpeedLabel = $("#tts-speed-label", root);
   const micPanelEl = $("#mic-panel", root);
   const micSpeechAreaEl = $("#mic-speech-area", root);
   const micLiveDotEl = $("#mic-live-dot", root);
@@ -399,6 +455,64 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     autoPlayCheck.checked = settings.autoPlayAudio;
     wakeEnabledCheck.checked = settings.wakeWordEnabled;
     fillAreaSelect();
+    applyTtsToForm();
+  }
+
+  function fillVoiceSelects(voices: string[]): void {
+    const currentVoice = ttsVoiceSelect.value;
+    const currentMix = ttsMixVoiceSelect.value;
+
+    ttsVoiceSelect.innerHTML = "";
+    for (const id of voices) {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = id;
+      ttsVoiceSelect.appendChild(opt);
+    }
+
+    ttsMixVoiceSelect.innerHTML = "";
+    const noneOpt = document.createElement("option");
+    noneOpt.value = "";
+    noneOpt.textContent = "(nenhuma)";
+    ttsMixVoiceSelect.appendChild(noneOpt);
+    for (const id of voices) {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = id;
+      ttsMixVoiceSelect.appendChild(opt);
+    }
+
+    if (currentVoice && voices.includes(currentVoice)) {
+      ttsVoiceSelect.value = currentVoice;
+    }
+    if (currentMix && voices.includes(currentMix)) {
+      ttsMixVoiceSelect.value = currentMix;
+    }
+  }
+
+  function applyTtsToForm(): void {
+    if (!ttsSettings) return;
+    fillVoiceSelects(ttsSettings.voices);
+    ttsVoiceSelect.value = ttsSettings.voice;
+    ttsMixVoiceSelect.value = ttsSettings.mix_voice || "";
+    ttsMixAmountInput.value = String(Math.round(ttsSettings.mix_amount * 100));
+    ttsSpeedInput.value = String(Math.round(ttsSettings.speed * 100));
+    updateTtsRangeLabels();
+  }
+
+  function updateTtsRangeLabels(): void {
+    ttsMixAmountLabel.textContent = `${ttsMixAmountInput.value}%`;
+    ttsSpeedLabel.textContent = `${(Number(ttsSpeedInput.value) / 100).toFixed(1)}×`;
+  }
+
+  function readTtsFromForm(): Pick<TtsSettings, "voice" | "mix_voice" | "mix_amount" | "speed"> {
+    const mixAmount = Number(ttsMixAmountInput.value) / 100;
+    return {
+      voice: ttsVoiceSelect.value,
+      mix_voice: ttsMixVoiceSelect.value || null,
+      mix_amount: mixAmount,
+      speed: Number(ttsSpeedInput.value) / 100,
+    };
   }
 
   function resetVoiceInputPreview(): void {
@@ -512,13 +626,15 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   }
 
   function setSettingsOpen(open: boolean): void {
-    settingsPopover.hidden = !open;
+    settingsOverlay.hidden = !open;
+    settingsOverlay.setAttribute("aria-hidden", String(!open));
     btnSettings.setAttribute("aria-expanded", String(open));
     btnSettings.classList.toggle("btn-gear--open", open);
+    if (open) void loadTtsSettings();
   }
 
   function toggleSettings(): void {
-    setSettingsOpen(settingsPopover.hidden);
+    setSettingsOpen(settingsOverlay.hidden);
   }
 
   /** Interrompe pedido, áudio, animação e microfone. */
@@ -591,6 +707,18 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     fillAreaSelect();
   }
 
+  async function loadTtsSettings(): Promise<void> {
+    try {
+      ttsSettings = await fetchTtsSettings(settings);
+      applyTtsToForm();
+    } catch (e) {
+      pushChat(
+        "system",
+        `Não foi possível carregar vozes: ${(e as Error).message}`,
+      );
+    }
+  }
+
   async function checkHealth(): Promise<void> {
     setState("thinking");
     try {
@@ -624,7 +752,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
       <div class="health-item"><span>LLM</span>${h.llm_provider}</div>
       <div class="health-item"><span>Modelo</span>${h.llm_model}</div>
       <div class="health-item"><span>Voz</span>${h.kokoro_voice}</div>
-      <div class="health-item"><span>Velocidade</span>${h.kokoro_speed}</div>
+      <div class="health-item"><span>Velocidade</span>${h.kokoro_speed}×</div>
       <div class="health-item"><span>Home Assistant</span>${haLabel}</div>
     `;
   }
@@ -715,14 +843,13 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     ev.stopPropagation();
     toggleSettings();
   });
-  document.addEventListener("click", (ev) => {
-    if (settingsPopover.hidden) return;
-    const menu = root.querySelector(".settings-menu");
-    if (menu && !menu.contains(ev.target as Node)) {
-      setSettingsOpen(false);
-    }
+  btnSettingsClose.addEventListener("click", () => setSettingsOpen(false));
+  settingsOverlay.addEventListener("click", (ev) => {
+    if (ev.target === settingsOverlay) setSettingsOpen(false);
   });
-  settingsPopover.addEventListener("click", (ev) => ev.stopPropagation());
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !settingsOverlay.hidden) setSettingsOpen(false);
+  });
 
   chatForm.addEventListener("submit", (ev) => {
     ev.preventDefault();
@@ -730,22 +857,43 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     void sendMessage(chatInput.value, pendingWake);
   });
 
+  ttsMixAmountInput.addEventListener("input", updateTtsRangeLabels);
+  ttsSpeedInput.addEventListener("input", updateTtsRangeLabels);
+
   $("#settings-form", root).addEventListener("submit", (ev) => {
     ev.preventDefault();
-    const wasWake = settings.wakeWordEnabled;
-    settings = {
-      apiBase: apiBaseInput.value.trim(),
-      areaId: areaSelect.value,
-      autoPlayAudio: autoPlayCheck.checked,
-      wakeWordEnabled: wakeEnabledCheck.checked,
-    };
-    saveSettings(settings);
-    pushChat("system", "Configurações salvas.");
-    setSettingsOpen(false);
-    if (settings.wakeWordEnabled && !wasWake && !micActive) startMic();
-    if (!settings.wakeWordEnabled && micActive) stopMic();
-    void refreshAreas();
-    void checkHealth();
+    void (async () => {
+      const wasWake = settings.wakeWordEnabled;
+      settings = {
+        apiBase: apiBaseInput.value.trim(),
+        areaId: areaSelect.value,
+        autoPlayAudio: autoPlayCheck.checked,
+        wakeWordEnabled: wakeEnabledCheck.checked,
+      };
+      saveSettings(settings);
+
+      try {
+        ttsSettings = await saveTtsSettings(settings, readTtsFromForm());
+        applyTtsToForm();
+        pushChat("system", "Configurações salvas (incluindo voz).");
+      } catch (e) {
+        const msg = (e as Error).message;
+        const hint =
+          msg.includes("404") || /not found/i.test(msg)
+            ? " Reinicie o thina-server (.\restart.ps1) — a API de voz foi atualizada."
+            : "";
+        pushChat(
+          "system",
+          `Configurações locais salvas, mas voz falhou: ${msg}.${hint}`,
+        );
+      }
+
+      setSettingsOpen(false);
+      if (settings.wakeWordEnabled && !wasWake && !micActive) startMic();
+      if (!settings.wakeWordEnabled && micActive) stopMic();
+      void refreshAreas();
+      void checkHealth();
+    })();
   });
 
   applySettingsToForm();
@@ -753,7 +901,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
   renderMicSpeechArea();
   renderChat();
   void refreshAreas().then(async () => {
-    await checkHealth();
+    await Promise.all([checkHealth(), loadTtsSettings()]);
     tryAutoStartMic();
   });
 

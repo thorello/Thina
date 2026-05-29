@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 
 from thina.core.config import AUDIO_DIR, get_settings
+from thina.core.tts_settings import FALLBACK_VOICES, get_effective_tts_settings
 from thina.speech.normalize import preparar_texto_para_voz
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,34 @@ class AudioResult:
     public_url: str
 
 
+async def listar_vozes() -> list[str]:
+    """Lista vozes disponíveis no Kokoro; fallback estático se indisponível."""
+    settings = get_settings()
+    url = f"{settings.kokoro_server_url}/voices"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
+    except httpx.RequestError as exc:
+        logger.debug("Kokoro /voices indisponível: %s", exc)
+        return list(FALLBACK_VOICES)
+
+    if response.status_code >= 400:
+        logger.debug("Kokoro /voices retornou %s", response.status_code)
+        return list(FALLBACK_VOICES)
+
+    try:
+        data = response.json()
+    except ValueError:
+        return list(FALLBACK_VOICES)
+
+    voices = data.get("voices", [])
+    if not isinstance(voices, list) or not voices:
+        return list(FALLBACK_VOICES)
+
+    result = [str(v).strip() for v in voices if str(v).strip()]
+    return sorted(set(result)) if result else list(FALLBACK_VOICES)
+
+
 async def sintetizar(texto: str) -> AudioResult:
     """
     Envia o texto final para o Kokoro e grava o WAV em data/audio/.
@@ -48,6 +77,7 @@ async def sintetizar(texto: str) -> AudioResult:
     Retorna caminho local e URL publica (THINA_PUBLIC_URL/v1/audio/{id}.wav).
     """
     settings = get_settings()
+    tts = get_effective_tts_settings()
     settings.ensure_audio_dir()
 
     texto = preparar_texto_para_voz(texto)
@@ -59,17 +89,17 @@ async def sintetizar(texto: str) -> AudioResult:
 
     payload: dict[str, object] = {
         "text": texto,
-        "voice": settings.kokoro_voice,
-        "speed": settings.kokoro_speed,
-        "sentiment": settings.kokoro_sentiment,
-        "mix_amount": settings.kokoro_mix_amount,
+        "voice": tts.voice,
+        "speed": tts.speed,
+        "sentiment": tts.sentiment,
+        "mix_amount": tts.mix_amount,
     }
-    mix_voice = (settings.kokoro_mix_voice or "").strip()
-    mix_amount = float(settings.kokoro_mix_amount)
+    mix_voice = (tts.mix_voice or "").strip()
+    mix_amount = float(tts.mix_amount)
     if mix_amount > 0:
         if not mix_voice:
             logger.warning(
-                "KOKORO_MIX_AMOUNT=%.2f mas KOKORO_MIX_VOICE vazio; Kokoro ignora a mistura.",
+                "mix_amount=%.2f mas mix_voice vazio; Kokoro ignora a mistura.",
                 mix_amount,
             )
         else:
@@ -80,12 +110,12 @@ async def sintetizar(texto: str) -> AudioResult:
         logger.info(
             "Sintetizando voz via Kokoro (%d caracteres): %s + %.0f%% %s",
             len(texto),
-            settings.kokoro_voice,
+            tts.voice,
             mix_amount * 100,
             mix_voice,
         )
     else:
-        logger.info("Sintetizando voz via Kokoro (%d caracteres): %s", len(texto), settings.kokoro_voice)
+        logger.info("Sintetizando voz via Kokoro (%d caracteres): %s", len(texto), tts.voice)
 
     try:
         async with httpx.AsyncClient(timeout=settings.kokoro_timeout) as client:

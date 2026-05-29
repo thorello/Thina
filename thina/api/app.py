@@ -21,8 +21,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from thina.api.schemas import ConversarRequest, ConversarResponse
+from thina.api.schemas import (
+    ConversarRequest,
+    ConversarResponse,
+    TtsSettingsResponse,
+    TtsSettingsUpdate,
+)
 from thina.core.config import AUDIO_DIR, BASE_DIR, get_settings, setup_logging
+from thina.core.tts_settings import (
+    get_effective_tts_settings,
+    save_tts_overrides,
+    voice_label,
+)
 from thina.core.conversation import append_turn, clear_session, get_historico
 from thina.integrations.homeassistant import (
     HAAuthError,
@@ -34,6 +44,7 @@ from thina.integrations.kokoro import (
     KokoroConnectionError,
     KokoroError,
     KokoroResponseError,
+    listar_vozes,
     sintetizar,
 )
 from thina.llm.gemini_mcp import processar_mensagem
@@ -147,12 +158,7 @@ async def health() -> dict[str, str | list[str] | bool]:
         if settings.llm_provider == "deepseek"
         else settings.gemini_model
     )
-    mix_voice = settings.kokoro_mix_voice or ""
-    voice_label = settings.kokoro_voice
-    if mix_voice and settings.kokoro_mix_amount > 0:
-        voice_label = (
-            f"{settings.kokoro_voice}+{settings.kokoro_mix_amount:.0%}_{mix_voice}"
-        )
+    tts = get_effective_tts_settings()
 
     ha_ok = False
     if settings.home_assistant_token:
@@ -168,13 +174,62 @@ async def health() -> dict[str, str | list[str] | bool]:
         "service": "thina",
         "llm_provider": settings.llm_provider,
         "llm_model": llm_model,
-        "kokoro_voice": voice_label,
-        "kokoro_speed": str(settings.kokoro_speed),
-        "kokoro_sentiment": settings.kokoro_sentiment,
+        "kokoro_voice": voice_label(tts),
+        "kokoro_speed": str(tts.speed),
+        "kokoro_mix_voice": tts.mix_voice or "",
+        "kokoro_mix_amount": str(tts.mix_amount),
+        "kokoro_sentiment": tts.sentiment,
         "areas": sorted(_areas_map.keys()),
         "ha_ok": ha_ok,
         "ha_url": settings.home_assistant_url,
     }
+
+
+@app.get("/v1/tts/settings", response_model=TtsSettingsResponse)
+async def get_tts_settings() -> TtsSettingsResponse:
+    """Configuração efetiva de voz (env + overrides da UI) e lista de vozes Kokoro."""
+    tts = get_effective_tts_settings()
+    voices = await listar_vozes()
+    for name in (tts.voice, tts.mix_voice):
+        if name and name not in voices:
+            voices.append(name)
+    voices.sort()
+    return TtsSettingsResponse(
+        voice=tts.voice,
+        mix_voice=tts.mix_voice,
+        mix_amount=tts.mix_amount,
+        speed=tts.speed,
+        sentiment=tts.sentiment,
+        voices=voices,
+    )
+
+
+@app.put("/v1/tts/settings", response_model=TtsSettingsResponse)
+async def update_tts_settings(body: TtsSettingsUpdate) -> TtsSettingsResponse:
+    """Atualiza voz, mistura e velocidade (persistido em data/tts_settings.json)."""
+    try:
+        tts = save_tts_overrides(
+            voice=body.voice,
+            mix_voice=body.mix_voice,
+            mix_amount=body.mix_amount,
+            speed=body.speed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    voices = await listar_vozes()
+    for name in (tts.voice, tts.mix_voice):
+        if name and name not in voices:
+            voices.append(name)
+    voices.sort()
+    return TtsSettingsResponse(
+        voice=tts.voice,
+        mix_voice=tts.mix_voice,
+        mix_amount=tts.mix_amount,
+        speed=tts.speed,
+        sentiment=tts.sentiment,
+        voices=voices,
+    )
 
 
 @app.get("/v1/audio/{audio_id}.wav")

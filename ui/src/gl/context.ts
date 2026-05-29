@@ -8,7 +8,7 @@ export function createGlContext(canvas: HTMLCanvasElement): WebGL2RenderingConte
   if (!gl) throw new Error("WebGL2 não disponível neste navegador.");
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-  gl.clearColor(0.02, 0.03, 0.06, 1);
+  gl.clearColor(0.008, 0.006, 0.022, 1);
   return gl;
 }
 

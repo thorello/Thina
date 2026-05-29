@@ -19,8 +19,23 @@ if (!canvas || !appRoot) {
 
 const gl = createGlContext(canvas);
 const orb = new OrbRenderer(canvas, gl);
-orb.start();
+
+function syncGalaxyFocal(): void {
+  const stage = document.getElementById("galaxy-stage");
+  orb.setFocalFromElement(stage);
+  orb.resize();
+}
+
 const ui = mountApp(appRoot);
+syncGalaxyFocal();
+
+const focalObserver = new ResizeObserver(() => syncGalaxyFocal());
+const stageEl = document.getElementById("galaxy-stage");
+if (stageEl) focalObserver.observe(stageEl);
+focalObserver.observe(appRoot);
+window.addEventListener("resize", syncGalaxyFocal);
+
+orb.start();
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {

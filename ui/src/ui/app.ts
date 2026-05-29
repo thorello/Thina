@@ -151,7 +151,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
       </section>
     </aside>
 
-    <div class="center-col">
+    <div class="center-col" id="galaxy-stage">
       <div class="orb-hint" id="orb-hint">
         <p>${STATE_HINTS.idle}</p>
       </div>
@@ -193,7 +193,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
     </aside>
 
     <footer class="footer-bar">
-      Interface WebGL · estados sincronizados com LLM, Kokoro e Home Assistant
+      Interface WebGL · galáxia 3D sincronizada com LLM, Kokoro e Home Assistant
     </footer>
   `;
 
@@ -490,8 +490,6 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
       pushChat("thina", result.resposta);
 
       if (settings.autoPlayAudio && result.audio_url) {
-        stopSpeakAnim?.();
-        stopSpeakAnim = animateSpeakingEnergy((e) => setEnergy(e), 8000);
         const src = resolveAudioUrl(settings, result.audio_url);
         const finishSpeaking = () => {
           stopSpeakAnim?.();
@@ -499,7 +497,7 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
           setState("idle");
         };
         try {
-          await playResponseAudio(src);
+          await playResponseAudio(src, (e) => setEnergy(e));
           finishSpeaking();
         } catch {
           pushChat(
@@ -511,9 +509,21 @@ export function mountApp(root: HTMLElement): ThinaUiControls {
         }
       } else if (!settings.autoPlayAudio) {
         pushChat("system", "Reprodução no navegador desligada nas configurações.");
-        setTimeout(() => setState("idle"), 1200);
+        stopSpeakAnim?.();
+        stopSpeakAnim = animateSpeakingEnergy((e) => setEnergy(e), 1200);
+        setTimeout(() => {
+          stopSpeakAnim?.();
+          setEnergy(0);
+          setState("idle");
+        }, 1200);
       } else {
-        setTimeout(() => setState("idle"), 1200);
+        stopSpeakAnim?.();
+        stopSpeakAnim = animateSpeakingEnergy((e) => setEnergy(e), 1200);
+        setTimeout(() => {
+          stopSpeakAnim?.();
+          setEnergy(0);
+          setState("idle");
+        }, 1200);
       }
     } catch (e) {
       setState("error");

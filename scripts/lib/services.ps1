@@ -71,20 +71,32 @@ function Get-StackConfig {
     $haManaged = $true
     if ($env["HOME_ASSISTANT_MANAGED"] -eq "false") { $haManaged = $false }
 
+    $wslDistro = $env["WSL_DISTRO"]
+    if (-not $wslDistro) { $wslDistro = "Ubuntu" }
+
+    $uiPort = 5173
+    if ($env["THINA_UI_PORT"]) { [void][int]::TryParse($env["THINA_UI_PORT"], [ref]$uiPort) }
+
     return [PSCustomObject]@{
         Root          = $root
         RunDir        = Get-RunDir $root
         KokoroDir     = $kokoroDir
         ThinaPort     = $thinaPort
         KokoroPort    = $kokoroPort
+        UiPort        = $uiPort
         HaPort        = $haPort
         HaManaged     = $haManaged
         HaComposeDir  = Join-Path $root "scripts\ha"
         HaContainer   = "thina-homeassistant"
-        WslDistro     = $env["WSL_DISTRO"]
+        WslDistro     = $wslDistro
         ThinaPy       = if (Test-Path $thinaVenv) { $thinaVenv } else { "python" }
         KokoroPy      = if (Test-Path $kokoroVenv) { $kokoroVenv } else { "python" }
     }
+}
+
+function Get-StackServiceCount {
+    param([object]$Cfg)
+    return $(if ($Cfg.HaManaged) { 4 } else { 3 })
 }
 
 function Get-WslExeArgs {
@@ -112,13 +124,37 @@ function ConvertTo-WslPath {
 function Invoke-WslCommand {
     param(
         [object]$Cfg,
-        [string[]]$Command
+        [string[]]$Command,
+        [int]$TimeoutSec = 0
     )
     $wslBase = Get-WslExeArgs $Cfg
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $out = & wsl @wslBase @Command 2>&1 | ForEach-Object { "$_" }
-    $exit = $LASTEXITCODE
+
+    if ($TimeoutSec -gt 0) {
+        $job = Start-Job -ScriptBlock {
+            param($Base, $Cmd)
+            $ErrorActionPreference = "Continue"
+            $o = & wsl @Base @Cmd 2>&1 | ForEach-Object { "$_" }
+            [PSCustomObject]@{ Exit = $LASTEXITCODE; Out = $o }
+        } -ArgumentList (,$wslBase), (,$Command)
+
+        $done = Wait-Job $job -Timeout $TimeoutSec
+        if (-not $done) {
+            Stop-Job $job -Force -ErrorAction SilentlyContinue
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+            $ErrorActionPreference = $prevEap
+            throw "Comando WSL expirou (${TimeoutSec}s): $($Command -join ' ')"
+        }
+        $result = Receive-Job $job
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        $exit = $result.Exit
+        $out = $result.Out
+    } else {
+        $out = & wsl @wslBase @Command 2>&1 | ForEach-Object { "$_" }
+        $exit = $LASTEXITCODE
+    }
+
     $ErrorActionPreference = $prevEap
     if ($exit -ne 0) {
         throw "Comando WSL falhou (exit $exit): $($Command -join ' ') | $out"
@@ -129,18 +165,24 @@ function Invoke-WslCommand {
 function Invoke-WslDocker {
     param(
         [object]$Cfg,
-        [string[]]$DockerArgs
+        [string[]]$DockerArgs,
+        [int]$TimeoutSec = 0
     )
     $dockerCmd = @("docker") + @($DockerArgs)
-    return Invoke-WslCommand -Cfg $Cfg -Command $dockerCmd
+    return Invoke-WslCommand -Cfg $Cfg -Command $dockerCmd -TimeoutSec $TimeoutSec
 }
 
 function Test-WslDocker {
-    param([object]$Cfg)
+    param(
+        [object]$Cfg,
+        [int]$TimeoutSec = 90
+    )
     try {
-        Invoke-WslDocker -Cfg $Cfg -DockerArgs @("version", "--format", "{{.Server.Version}}") | Out-Null
+        Write-Host "  Verificando Docker no WSL ($($Cfg.WslDistro), ate ${TimeoutSec}s) ..."
+        Invoke-WslDocker -Cfg $Cfg -DockerArgs @("version", "--format", "{{.Server.Version}}") -TimeoutSec $TimeoutSec | Out-Null
         return $true
     } catch {
+        Write-Host "  $($_.Exception.Message)" -ForegroundColor DarkYellow
         return $false
     }
 }
@@ -165,14 +207,37 @@ function Test-HomeAssistantHttp {
     return Wait-HttpOk "http://127.0.0.1:$($Cfg.HaPort)/" 5 1
 }
 
-function Start-HomeAssistant {
+function Restart-HomeAssistantContainers {
     param([object]$Cfg)
+    $restarted = $false
+    foreach ($name in @($Cfg.HaContainer, "homeassistant")) {
+        try {
+            $running = Invoke-WslDocker -Cfg $Cfg -DockerArgs @(
+                "ps", "--filter", "name=^/${name}$", "--filter", "status=running", "-q"
+            )
+            if (($running | Out-String).Trim()) {
+                Invoke-WslDocker -Cfg $Cfg -DockerArgs @("restart", $name) | Out-Null
+                Write-Host "  [homeassistant] container $name reiniciado" -ForegroundColor Green
+                $restarted = $true
+            }
+        } catch { }
+    }
+    return $restarted
+}
+
+function Start-HomeAssistant {
+    param(
+        [object]$Cfg,
+        [switch]$ForceRestart
+    )
     if (-not $Cfg.HaManaged) {
         Write-Host "  [homeassistant] HOME_ASSISTANT_MANAGED=false - ignorado" -ForegroundColor DarkGray
         return
     }
     if (-not (Test-WslDocker $Cfg)) {
-        throw "Docker nao encontrado no WSL. Instale no WSL ou defina WSL_DISTRO no .env."
+        Write-Host "  AVISO: Docker/WSL indisponivel ou lento - HA ignorado; Kokoro e Thina seguem." -ForegroundColor Yellow
+        Write-Host "  Dica: wsl --shutdown; confira WSL_DISTRO no .env; ou HOME_ASSISTANT_MANAGED=false" -ForegroundColor DarkGray
+        return
     }
 
     $composeFile = Join-Path $Cfg.HaComposeDir "docker-compose.yml"
@@ -187,7 +252,17 @@ function Start-HomeAssistant {
 
     $haUrl = "http://127.0.0.1:$($Cfg.HaPort)/"
 
-    if (Test-HomeAssistantHttp $Cfg) {
+    if ($ForceRestart) {
+        if (Restart-HomeAssistantContainers $Cfg) {
+            Write-Host "  Aguardando $haUrl apos reinicio do container ..."
+            if (Wait-HttpOk $haUrl 120) {
+                Write-Host "  Home Assistant OK" -ForegroundColor Green
+            } else {
+                Write-Host "  AVISO: HA ainda nao respondeu apos restart. Veja: wsl docker logs homeassistant" -ForegroundColor Yellow
+            }
+            return
+        }
+    } elseif (Test-HomeAssistantHttp $Cfg) {
         Write-Host "  [homeassistant] ja responde em $haUrl" -ForegroundColor Green
         return
     }
@@ -213,8 +288,8 @@ function Start-HomeAssistant {
         }
     }
 
-    Write-Host "  Aguardando $haUrl (primeira subida pode demorar varios minutos) ..."
-    if (-not (Wait-HttpOk $haUrl 300)) {
+    Write-Host "  Aguardando $haUrl - ate 60s, depois Kokoro/Thina sobem mesmo sem HA ..."
+    if (-not (Wait-HttpOk $haUrl 60)) {
         Write-Host "  AVISO: HA ainda nao respondeu. Veja: wsl docker logs homeassistant" -ForegroundColor Yellow
     } else {
         Write-Host "  Home Assistant OK" -ForegroundColor Green
@@ -222,7 +297,10 @@ function Start-HomeAssistant {
 }
 
 function Stop-HomeAssistant {
-    param([object]$Cfg)
+    param(
+        [object]$Cfg,
+        [switch]$Force
+    )
     if (-not $Cfg.HaManaged) {
         Write-Host "  [homeassistant] HOME_ASSISTANT_MANAGED=false - ignorado" -ForegroundColor DarkGray
         return
@@ -233,27 +311,41 @@ function Stop-HomeAssistant {
     }
 
     $stopped = $false
-    try {
-        $managed = Invoke-WslDocker -Cfg $Cfg -DockerArgs @(
-            "ps", "-a", "--filter", "name=^/$($Cfg.HaContainer)$", "-q"
-        )
-        if (($managed | Out-String).Trim()) {
-            $wslHaDir = ConvertTo-WslPath $Cfg.HaComposeDir
-            Invoke-WslCommand -Cfg $Cfg -Command @(
-                "bash", "-lc",
-                "cd '$wslHaDir'; docker compose down"
-            ) | Out-Null
-            $stopped = $true
-        }
-    } catch {
-        Invoke-WslDocker -Cfg $Cfg -DockerArgs @("rm", "-f", $Cfg.HaContainer) 2>$null | Out-Null
-        $stopped = $true
+    foreach ($name in @($Cfg.HaContainer, "homeassistant")) {
+        try {
+            $running = Invoke-WslDocker -Cfg $Cfg -DockerArgs @(
+                "ps", "--filter", "name=^/${name}$", "--filter", "status=running", "-q"
+            )
+            if (($running | Out-String).Trim()) {
+                Invoke-WslDocker -Cfg $Cfg -DockerArgs @("stop", $name) | Out-Null
+                Write-Host "  [homeassistant] container $name parado" -ForegroundColor Green
+                $stopped = $true
+            }
+        } catch { }
     }
 
-    if ($stopped) {
-        Write-Host "  [homeassistant] container $($Cfg.HaContainer) parado" -ForegroundColor Green
-    } else {
-        Write-Host "  [homeassistant] $($Cfg.HaContainer) ausente (container 'homeassistant' externo nao e parado)" -ForegroundColor DarkGray
+    if (-not $stopped -or -not $Force) {
+        try {
+            $managed = Invoke-WslDocker -Cfg $Cfg -DockerArgs @(
+                "ps", "-a", "--filter", "name=^/$($Cfg.HaContainer)$", "-q"
+            )
+            if (($managed | Out-String).Trim()) {
+                $wslHaDir = ConvertTo-WslPath $Cfg.HaComposeDir
+                Invoke-WslCommand -Cfg $Cfg -Command @(
+                    "bash", "-lc",
+                    "cd '$wslHaDir'; docker compose down"
+                ) | Out-Null
+                Write-Host "  [homeassistant] compose down ($($Cfg.HaContainer))" -ForegroundColor Green
+                $stopped = $true
+            }
+        } catch {
+            Invoke-WslDocker -Cfg $Cfg -DockerArgs @("rm", "-f", $Cfg.HaContainer) 2>$null | Out-Null
+            $stopped = $true
+        }
+    }
+
+    if (-not $stopped) {
+        Write-Host "  [homeassistant] nao estava em execucao" -ForegroundColor DarkGray
     }
 }
 
@@ -262,15 +354,62 @@ function Get-PidFilePath {
     return Join-Path $RunDir "$Name.pid"
 }
 
-function Get-ListenerPid {
+function Get-ListenerPids {
     param([int]$Port)
+    $pids = [System.Collections.Generic.HashSet[int]]::new()
     $lines = netstat -ano 2>$null | Select-String ":\s*$Port\s+.*LISTENING"
     foreach ($line in $lines) {
         if ($line -match '\s+(\d+)\s*$') {
-            return [int]$Matches[1]
+            [void]$pids.Add([int]$Matches[1])
         }
     }
+    return @($pids)
+}
+
+function Get-ListenerPid {
+    param([int]$Port)
+    $all = Get-ListenerPids $Port
+    if ($all.Count -gt 0) { return $all[0] }
     return $null
+}
+
+function Stop-PortListeners {
+    param(
+        [int]$Port,
+        [string]$Label,
+        [string]$PortProcessPattern = "",
+        [switch]$AnyProcess
+    )
+    if ($Port -le 0) { return $false }
+    $killed = $false
+    foreach ($portPid in (Get-ListenerPids $Port)) {
+        if (-not (Test-ProcessAlive $portPid)) { continue }
+        $proc = Get-Process -Id $portPid -ErrorAction SilentlyContinue
+        if (-not $proc) { continue }
+        $ok = $AnyProcess
+        if (-not $ok -and $PortProcessPattern) {
+            $ok = $proc.ProcessName -match $PortProcessPattern
+        }
+        if (-not $ok) { continue }
+        Stop-Process -Id $portPid -Force -ErrorAction SilentlyContinue
+        Write-Host "  [$Label] porta $Port liberada (PID $portPid $($proc.ProcessName))" -ForegroundColor Green
+        $killed = $true
+    }
+    return $killed
+}
+
+function Wait-ServicePortsFree {
+    param(
+        [int[]]$Ports,
+        [int]$TimeoutSec = 20
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $busy = @($Ports | Where-Object { $_ -gt 0 -and (Get-ListenerPids $_).Count -gt 0 })
+        if (-not $busy) { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return $false
 }
 
 function Test-ProcessAlive {
@@ -300,25 +439,42 @@ function Start-ManagedProcess {
     param(
         [string]$Name,
         [string]$WorkingDirectory,
-        [string]$Python,
+        [string]$Executable,
         [string[]]$Arguments,
-        [string]$RunDir
+        [string]$RunDir,
+        [int]$ListenPort = 0,
+        [string]$PortProcessPattern = "",
+        [switch]$ForceRestart
     )
     $pidFile = Get-PidFilePath $Name $RunDir
-    if (Test-Path $pidFile) {
-        $oldPid = [int](Get-Content $pidFile -Raw)
-        if (Test-ProcessAlive $oldPid) {
-            Write-Host "  [$Name] ja em execucao (PID $oldPid)" -ForegroundColor Yellow
-            return $oldPid
+    if ($ForceRestart) {
+        if (Test-Path $pidFile) {
+            Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
         }
-        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        if ($ListenPort -gt 0) {
+            Stop-PortListeners -Port $ListenPort -Label $Name -PortProcessPattern $PortProcessPattern -AnyProcess:(-not $PortProcessPattern)
+            Start-Sleep -Milliseconds 500
+        }
+    } else {
+        if (Test-Path $pidFile) {
+            $oldPid = [int](Get-Content $pidFile -Raw)
+            if (Test-ProcessAlive $oldPid) {
+                Write-Host "  [$Name] ja em execucao (PID $oldPid)" -ForegroundColor Yellow
+                return $oldPid
+            }
+            Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        }
+        if ($ListenPort -gt 0 -and (Get-ListenerPid $ListenPort)) {
+            Write-Host "  [$Name] porta $ListenPort em uso - ignorado (use restart para reiniciar)" -ForegroundColor Yellow
+            return $null
+        }
     }
 
     $outLog = Join-Path $RunDir "$Name.stdout.log"
     $errLog = Join-Path $RunDir "$Name.stderr.log"
 
     $proc = Start-Process `
-        -FilePath $Python `
+        -FilePath $Executable `
         -ArgumentList $Arguments `
         -WorkingDirectory $WorkingDirectory `
         -WindowStyle Hidden `
@@ -331,11 +487,56 @@ function Start-ManagedProcess {
     return $proc.Id
 }
 
+function Ensure-ThinaUiDependencies {
+    param([object]$Cfg)
+    $uiDir = Join-Path $cfg.Root "ui"
+    if (Test-Path (Join-Path $uiDir "node_modules")) { return }
+    $npm = (Get-Command npm -ErrorAction Stop).Source
+    Write-Host "  [thina-ui] npm install em ui/ (primeira vez) ..."
+    & $npm install --prefix $uiDir --no-fund --no-audit 2>&1 | ForEach-Object { "  $_" } | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "npm install em ui/ falhou (exit $LASTEXITCODE)"
+    }
+}
+
+function Start-ThinaUiDev {
+    param(
+        [object]$Cfg,
+        [switch]$ForceRestart
+    )
+    $uiUrl = "http://127.0.0.1:$($Cfg.UiPort)/ui/"
+    if (-not $ForceRestart -and (Wait-HttpOk $uiUrl 5 1)) {
+        Write-Host "  [thina-ui] ja responde em $uiUrl" -ForegroundColor Yellow
+        return
+    }
+
+    Ensure-ThinaUiDependencies $Cfg
+    $npm = (Get-Command npm -ErrorAction Stop).Source
+    Start-ManagedProcess `
+        -Name "thina-ui" `
+        -WorkingDirectory $Cfg.Root `
+        -Executable $npm `
+        -Arguments @("run", "dev") `
+        -RunDir $Cfg.RunDir `
+        -ListenPort $Cfg.UiPort `
+        -PortProcessPattern "node" `
+        -ForceRestart:$ForceRestart | Out-Null
+
+    Write-Host "  Aguardando $uiUrl ..."
+    if (-not (Wait-HttpOk $uiUrl 90)) {
+        Write-Host "  AVISO: Vite nao respondeu a tempo. Veja data\run\thina-ui.stderr.log" -ForegroundColor Yellow
+    } else {
+        Write-Host "  Painel UI OK" -ForegroundColor Green
+    }
+}
+
 function Stop-ManagedProcess {
     param(
         [string]$Name,
         [int]$Port,
-        [string]$RunDir
+        [string]$RunDir,
+        [string]$PortProcessPattern = "python",
+        [switch]$Force
     )
     $pidFile = Get-PidFilePath $Name $RunDir
     $stopped = $false
@@ -350,18 +551,9 @@ function Stop-ManagedProcess {
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
     }
 
-    $portPid = Get-ListenerPid $Port
-    if ($portPid -and (Test-ProcessAlive $portPid)) {
-        $proc = Get-Process -Id $portPid -ErrorAction SilentlyContinue
-        $isPython = $proc -and ($proc.ProcessName -match 'python')
-        if ($isPython -and -not $stopped) {
-            Stop-Process -Id $portPid -Force -ErrorAction SilentlyContinue
-            Write-Host "  [$Name] processo na porta $Port parado (PID $portPid)" -ForegroundColor Green
+    if ($Port -gt 0) {
+        if (Stop-PortListeners -Port $Port -Label $Name -PortProcessPattern $PortProcessPattern -AnyProcess:$Force) {
             $stopped = $true
-        } elseif ($isPython -and $stopped) {
-            # Pid file matou outro processo; ainda ha listener na porta
-            Stop-Process -Id $portPid -Force -ErrorAction SilentlyContinue
-            Write-Host "  [$Name] listener extra na porta $Port parado (PID $portPid)" -ForegroundColor Yellow
         }
     }
 
@@ -371,11 +563,15 @@ function Stop-ManagedProcess {
 }
 
 function Start-ThinaStack {
+    param([switch]$ForceRestart)
+
     $cfg = Get-StackConfig
+    $total = Get-StackServiceCount $cfg
     Write-Host "`n=== Subindo servicos Thina ===" -ForegroundColor Cyan
     Write-Host "Raiz: $($cfg.Root)"
     Write-Host "Kokoro: $($cfg.KokoroDir) :$($cfg.KokoroPort)"
     Write-Host "Thina:  :$($cfg.ThinaPort)"
+    Write-Host "UI:     http://127.0.0.1:$($cfg.UiPort)/ui/ (npm run dev)"
     if ($cfg.HaManaged) {
         Write-Host "HA:     http://127.0.0.1:$($cfg.HaPort) (Docker no WSL)`n"
     } else {
@@ -390,19 +586,25 @@ function Start-ThinaStack {
     }
 
     # 1) Home Assistant (Docker/WSL)
+    $step = 1
     if ($cfg.HaManaged) {
-        Write-Host "[1/3] Home Assistant"
-        Start-HomeAssistant $cfg
+        Write-Host "[$step/$total] Home Assistant"
+        Start-HomeAssistant $cfg -ForceRestart:$ForceRestart
+        $step++
     }
 
     # 2) Kokoro (TTS)
-    Write-Host $(if ($cfg.HaManaged) { "`n[2/3] Kokoro TTS" } else { "[1/2] Kokoro TTS" })
+    Write-Host "`n[$step/$total] Kokoro TTS"
     Start-ManagedProcess `
         -Name "kokoro" `
         -WorkingDirectory $cfg.KokoroDir `
-        -Python $cfg.KokoroPy `
+        -Executable $cfg.KokoroPy `
         -Arguments @("src\app.py") `
-        -RunDir $cfg.RunDir | Out-Null
+        -RunDir $cfg.RunDir `
+        -ListenPort $cfg.KokoroPort `
+        -PortProcessPattern "python" `
+        -ForceRestart:$ForceRestart | Out-Null
+    $step++
 
     $kokoroHealth = "http://127.0.0.1:$($cfg.KokoroPort)/voices"
     Write-Host "  Aguardando $kokoroHealth ..."
@@ -413,13 +615,16 @@ function Start-ThinaStack {
     }
 
     # 3) Thina
-    Write-Host $(if ($cfg.HaManaged) { "`n[3/3] thina-server" } else { "`n[2/2] thina-server" })
+    Write-Host "`n[$step/$total] thina-server"
     Start-ManagedProcess `
         -Name "thina" `
         -WorkingDirectory $cfg.Root `
-        -Python $cfg.ThinaPy `
+        -Executable $cfg.ThinaPy `
         -Arguments @("main.py") `
-        -RunDir $cfg.RunDir | Out-Null
+        -RunDir $cfg.RunDir `
+        -ListenPort $cfg.ThinaPort `
+        -PortProcessPattern "python" `
+        -ForceRestart:$ForceRestart | Out-Null
 
     $thinaHealth = "http://127.0.0.1:$($cfg.ThinaPort)/health"
     Write-Host "  Aguardando $thinaHealth ..."
@@ -428,6 +633,11 @@ function Start-ThinaStack {
     } else {
         Write-Host "  Thina OK" -ForegroundColor Green
     }
+    $step++
+
+    # 4) Painel Vite (npm run dev)
+    Write-Host "`n[$step/$total] Painel UI (npm run dev)"
+    Start-ThinaUiDev $cfg -ForceRestart:$ForceRestart
 
     Write-Host "`n=== Stack pronta ===" -ForegroundColor Cyan
     if ($cfg.HaManaged) {
@@ -435,32 +645,48 @@ function Start-ThinaStack {
     }
     Write-Host "  Kokoro:  http://127.0.0.1:$($cfg.KokoroPort)"
     Write-Host "  Thina:   http://127.0.0.1:$($cfg.ThinaPort)/health"
+    Write-Host "  UI:      http://127.0.0.1:$($cfg.UiPort)/ui/"
     Write-Host "  Docs:    http://127.0.0.1:$($cfg.ThinaPort)/docs"
     Write-Host "  Teste:   .\.venv\Scripts\python scripts\test_app.py"
     Write-Host "  Microfone: .\test-mic.ps1`n"
 }
 
 function Stop-ThinaStack {
+    param([switch]$Force)
+
     $cfg = Get-StackConfig
+    $total = Get-StackServiceCount $cfg
     Write-Host "`n=== Parando servicos Thina ===" -ForegroundColor Cyan
 
-    # Thina primeiro (depende do Kokoro)
     $step = 1
-    $total = if ($cfg.HaManaged) { 3 } else { 2 }
-    Write-Host "[$step/$total] thina-server"
-    Stop-ManagedProcess -Name "thina" -Port $cfg.ThinaPort -RunDir $cfg.RunDir
+    Write-Host "[$step/$total] Painel UI (Vite)"
+    Stop-ManagedProcess -Name "thina-ui" -Port $cfg.UiPort -RunDir $cfg.RunDir -PortProcessPattern "node" -Force:$Force
+
+    $step++
+    Write-Host "`n[$step/$total] thina-server"
+    Stop-ManagedProcess -Name "thina" -Port $cfg.ThinaPort -RunDir $cfg.RunDir -Force:$Force
 
     $step++
     Write-Host "`n[$step/$total] Kokoro TTS"
-    Stop-ManagedProcess -Name "kokoro" -Port $cfg.KokoroPort -RunDir $cfg.RunDir
+    Stop-ManagedProcess -Name "kokoro" -Port $cfg.KokoroPort -RunDir $cfg.RunDir -Force:$Force
 
     if ($cfg.HaManaged) {
         $step++
         Write-Host "`n[$step/$total] Home Assistant"
-        Stop-HomeAssistant $cfg
+        Stop-HomeAssistant $cfg -Force:$Force
     }
 
     Write-Host "`n=== Stack parada ===`n" -ForegroundColor Cyan
+}
+
+function Restart-ThinaStack {
+    $cfg = Get-StackConfig
+    Write-Host "`n=== Reiniciando stack Thina ===" -ForegroundColor Cyan
+    Stop-ThinaStack -Force
+    if (-not (Wait-ServicePortsFree -Ports @($cfg.UiPort, $cfg.ThinaPort, $cfg.KokoroPort) -TimeoutSec 25)) {
+        Write-Host "  AVISO: alguma porta ainda ocupada; tentando subir mesmo assim ..." -ForegroundColor Yellow
+    }
+    Start-ThinaStack -ForceRestart
 }
 
 function Show-ThinaStackStatus {
@@ -477,7 +703,8 @@ function Show-ThinaStackStatus {
     }
     $services += @(
         @{ Name = "kokoro"; Port = $cfg.KokoroPort; Health = "http://127.0.0.1:$($cfg.KokoroPort)/voices"; Docker = $false },
-        @{ Name = "thina"; Port = $cfg.ThinaPort; Health = "http://127.0.0.1:$($cfg.ThinaPort)/health"; Docker = $false }
+        @{ Name = "thina"; Port = $cfg.ThinaPort; Health = "http://127.0.0.1:$($cfg.ThinaPort)/health"; Docker = $false },
+        @{ Name = "thina-ui"; Port = $cfg.UiPort; Health = "http://127.0.0.1:$($cfg.UiPort)/ui/"; Docker = $false }
     )
 
     foreach ($svc in $services) {

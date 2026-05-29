@@ -113,8 +113,16 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, var(--accent), var(--violet));
-  box-shadow: 0 0 24px rgba(94, 234, 212, 0.35);
+  background: radial-gradient(
+    circle at 35% 35%,
+    #fff4d6 0%,
+    #c4a8ff 35%,
+    #3b4fd8 70%,
+    #120820 100%
+  );
+  box-shadow:
+    0 0 20px rgba(196, 168, 255, 0.45),
+    0 0 40px rgba(59, 79, 216, 0.25);
   animation: pulse-mark 3s ease-in-out infinite;
 }
 
@@ -199,7 +207,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   padding-bottom: 24px;
   pointer-events: none;
 }

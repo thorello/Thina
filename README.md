@@ -114,9 +114,9 @@ O `area_id` enviado pelo HA deve corresponder a uma chave deste ficheiro.
 Na raiz do projeto (Home Assistant via **Docker no WSL**):
 
 ```powershell
-.\start.ps1          # HA (:8123) + Kokoro (:8000) + Thina (THINA_PORT no .env)
+.\start.ps1          # HA (:8123) + Kokoro (:8000) + Thina + npm run dev (:5173/ui/)
 .\stop.ps1           # para os tres
-.\restart.ps1        # para e sobe de novo
+.\restart.ps1        # para (se ativo) e sobe de novo; se parado, apenas inicia
 .\scripts\status-services.ps1
 ```
 

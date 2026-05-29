@@ -15,6 +15,9 @@ const GALAXY_RADIUS = 1;
 const DISK_THICKNESS = 0.1;
 const NUCLEUS_RADIUS = 0.2;
 
+/** Período da respiração da galáxia quando ativa (~5 s ciclo completo). */
+const BREATH_OMEGA = (Math.PI * 2) / 5.0;
+
 /** Inclinação da câmera em radianos (~−28° em −0.50). Mais negativo = mais de lado. */
 const CAMERA_TILT_X = 0.60;
 /** Distância da câmera ao centro da galáxia (eixo Z). */
@@ -45,7 +48,10 @@ export class OrbRenderer {
   private dormantSmooth = 1;
   private audioSmooth = 0;
   private prevDrawMs = 0;
-  private time  = 0;
+  /** Tempo de simulação (s); avança só em draw(), não usa relógio absoluto do rAF. */
+  private time = 0;
+  /** Fase orbital do disco; congela em dormant e zera ao reativar. */
+  private orbitTime = 0;
   private raf   = 0;
   private paused = false;
   private unsub = () => {};
@@ -63,9 +69,11 @@ export class OrbRenderer {
     this.vao = this.buildGalaxy();
     this.coreVao = this.buildCoreVao();
     this.unsub = subscribe((s, e, dormant) => {
+      const waking = this.dormantTarget >= 0.5 && !dormant;
       this.state = stateIndex(s);
       this.energy = e;
       this.dormantTarget = dormant ? 1 : 0;
+      if (waking) this.orbitTime = 0;
     });
     this.resize();
     window.addEventListener("resize", this.onResize);
@@ -89,6 +97,7 @@ export class OrbRenderer {
       state:      gl.getUniformLocation(this.bgProg, "u_state"),
       energy:     gl.getUniformLocation(this.bgProg, "u_energy"),
       dormant:    gl.getUniformLocation(this.bgProg, "u_dormant"),
+      breath:     gl.getUniformLocation(this.bgProg, "u_breath"),
       resolution: gl.getUniformLocation(this.bgProg, "u_resolution"),
       center:     gl.getUniformLocation(this.bgProg, "u_center"),
     };
@@ -96,9 +105,11 @@ export class OrbRenderer {
     this.uPart = {
       viewProj:     gl.getUniformLocation(this.particleProg, "u_viewProj"),
       time:         gl.getUniformLocation(this.particleProg, "u_time"),
+      orbitTime:    gl.getUniformLocation(this.particleProg, "u_orbitTime"),
       state:        gl.getUniformLocation(this.particleProg, "u_state"),
       energy:       gl.getUniformLocation(this.particleProg, "u_energy"),
       dormant:      gl.getUniformLocation(this.particleProg, "u_dormant"),
+      breath:       gl.getUniformLocation(this.particleProg, "u_breath"),
       audio:        gl.getUniformLocation(this.particleProg, "u_audio"),
       screenOffset: gl.getUniformLocation(this.particleProg, "u_screenOffset"),
     };
@@ -109,6 +120,7 @@ export class OrbRenderer {
       state:        gl.getUniformLocation(this.coreProg, "u_state"),
       energy:       gl.getUniformLocation(this.coreProg, "u_energy"),
       dormant:      gl.getUniformLocation(this.coreProg, "u_dormant"),
+      breath:       gl.getUniformLocation(this.coreProg, "u_breath"),
       audio:        gl.getUniformLocation(this.coreProg, "u_audio"),
       screenOffset: gl.getUniformLocation(this.coreProg, "u_screenOffset"),
       resolution:   gl.getUniformLocation(this.coreProg, "u_resolution"),
@@ -212,13 +224,15 @@ export class OrbRenderer {
     ];
   }
 
-  setPaused(p: boolean): void { this.paused = p; }
+  setPaused(p: boolean): void {
+    if (this.paused && !p) this.prevDrawMs = 0;
+    this.paused = p;
+  }
 
   start(): void {
-    const loop = (now: number) => {
+    const loop = () => {
       this.raf = requestAnimationFrame(loop);
       if (this.paused || document.hidden) return;
-      this.time = now * 0.001;
       this.draw();
     };
     this.raf = requestAnimationFrame(loop);
@@ -232,7 +246,9 @@ export class OrbRenderer {
     this.unsub();
   }
 
-  private onVisibility = () => { this.paused = document.hidden; };
+  private onVisibility = () => {
+    if (!document.hidden) this.prevDrawMs = 0;
+  };
 
   bumpEnergy(target: number): void {
     const step = () => {
@@ -251,6 +267,7 @@ export class OrbRenderer {
     const nowMs = performance.now();
     const dt = this.prevDrawMs ? Math.min(0.05, (nowMs - this.prevDrawMs) / 1000) : 0.016;
     this.prevDrawMs = nowMs;
+    this.time += dt;
 
     const audioTarget = isSpeaking ? this.energy : 0;
     const smoothK = audioTarget > this.audioSmooth ? 14 : 5.5;
@@ -260,12 +277,15 @@ export class OrbRenderer {
     this.dormantSmooth +=
       (this.dormantTarget - this.dormantSmooth) * dormantK;
     const dormant = this.dormantSmooth;
+    const alive = 1.0 - dormant;
+    if (alive > 0.01) this.orbitTime += dt;
+    const breath = alive * Math.sin(this.time * BREATH_OMEGA);
 
-    const idleBreath = isSpeaking ? 0 : 0.10 * Math.sin(this.time * 0.72);
+    const idleBreath = isSpeaking ? 0 : breath * 0.14;
     let energy = isSpeaking
       ? 0.38 + this.audioSmooth * 0.62
       : 0.50 + idleBreath + this.energy * 0.50;
-    energy *= 1.0 - dormant * 0.55;
+    energy *= 0.45 + alive * 0.55;
     const audio = this.audioSmooth;
 
     this.updateView();
@@ -277,6 +297,7 @@ export class OrbRenderer {
     gl.uniform1f(this.uBg.state!,       this.state);
     gl.uniform1f(this.uBg.energy!,      energy);
     gl.uniform1f(this.uBg.dormant!,     dormant);
+    gl.uniform1f(this.uBg.breath!,      breath);
     gl.uniform2f(this.uBg.resolution!,  this.canvas.width, this.canvas.height);
     gl.uniform2f(this.uBg.center!,      this.focal.x, this.focal.y);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -286,9 +307,11 @@ export class OrbRenderer {
     gl.useProgram(this.particleProg);
     gl.uniformMatrix4fv(this.uPart.viewProj!,     false, this.viewProj);
     gl.uniform1f(this.uPart.time!,        this.time);
+    gl.uniform1f(this.uPart.orbitTime!,  this.orbitTime);
     gl.uniform1f(this.uPart.state!,       this.state);
     gl.uniform1f(this.uPart.energy!,      energy);
     gl.uniform1f(this.uPart.dormant!,     dormant);
+    gl.uniform1f(this.uPart.breath!,      breath);
     gl.uniform1f(this.uPart.audio!,       audio);
     gl.uniform2f(this.uPart.screenOffset!, offX, offY);
     gl.bindVertexArray(this.vao);
@@ -302,6 +325,7 @@ export class OrbRenderer {
     gl.uniform1f(this.uCore.state!,       this.state);
     gl.uniform1f(this.uCore.energy!,      energy);
     gl.uniform1f(this.uCore.dormant!,     dormant);
+    gl.uniform1f(this.uCore.breath!,      breath);
     gl.uniform1f(this.uCore.audio!,       audio);
     gl.uniform2f(this.uCore.screenOffset!, offX, offY);
     gl.uniform2f(this.uCore.resolution!,  this.canvas.width, this.canvas.height);

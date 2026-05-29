@@ -134,7 +134,8 @@ export function mountMicVisualizer(
       root.classList.toggle("mic-listen-viz--active", isActive);
       if (!isActive) return;
 
-      pushWaveform(waveform);
+      if (waveform.length > 0) pushWaveform(waveform);
+      dirty = true;
       scheduleDraw();
     },
     reset() {

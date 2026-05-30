@@ -1,0 +1,89 @@
+# Stack completa: Home Assistant + Kokoro TTS + thina-server
+# Uso: docker compose up -d --build
+# Ou:  .\start-docker.ps1
+
+name: thina
+
+services:
+  homeassistant:
+    container_name: thina-homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - ./data/homeassistant:/config
+    environment:
+      TZ: ${TZ:-America/Sao_Paulo}
+    ports:
+      - "${HA_HOST_PORT:-8123}:8123"
+    restart: unless-stopped
+    networks:
+      - thina
+
+  kokoro:
+    container_name: thina-kokoro
+    build:
+      context: ./kokoro
+      dockerfile: Dockerfile
+    volumes:
+      - ./kokoro/assets:/app/assets
+      - ./kokoro/data:/app/data
+    ports:
+      - "${KOKORO_HOST_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/voices', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+    networks:
+      - thina
+
+  thina:
+    container_name: thina-server
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      THINA_HOST: 0.0.0.0
+      THINA_PORT: 8080
+      KOKORO_SERVER_URL: http://kokoro:8000
+      HOME_ASSISTANT_URL: http://homeassistant:8123
+      THINA_PUBLIC_URL: http://thina:8080
+      PC_COMMANDS_ENABLED: ${PC_COMMANDS_ENABLED:-false}
+    ports:
+      - "${THINA_PORT:-8080}:8080"
+    volumes:
+      - ./maps:/app/maps
+      - ./data/audio:/app/data/audio
+      - ./data/tts_settings.json:/app/data/tts_settings.json
+    depends_on:
+      kokoro:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+    networks:
+      - thina
+
+networks:
+  thina:
+    name: thina

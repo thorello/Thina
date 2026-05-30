@@ -43,7 +43,7 @@ function Get-StackConfig {
 
     $kokoroDir = $env["KOKORO_DIR"]
     if (-not $kokoroDir) {
-        $kokoroDir = Join-Path (Split-Path $root -Parent) "kokoro"
+        $kokoroDir = Join-Path $root "kokoro"
     } elseif (-not [System.IO.Path]::IsPathRooted($kokoroDir)) {
         $kokoroDir = Join-Path $root $kokoroDir
     }
@@ -51,7 +51,10 @@ function Get-StackConfig {
     if ($resolved) {
         $kokoroDir = $resolved.Path
     } elseif (-not (Test-Path $kokoroDir)) {
-        $kokoroDir = Join-Path (Split-Path $root -Parent) "kokoro"
+        $legacy = Join-Path (Split-Path $root -Parent) "kokoro"
+        if (Test-Path $legacy) {
+            $kokoroDir = $legacy
+        }
     }
 
     $thinaPort = 8080

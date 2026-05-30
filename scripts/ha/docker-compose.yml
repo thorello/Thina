@@ -1,4 +1,5 @@
 # Home Assistant local para desenvolvimento com thina-server.
+# Preferir docker-compose.yml na raiz (stack unificada).
 # Config persistente: data/homeassistant (gitignore)
 services:
   homeassistant:

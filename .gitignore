@@ -1,3 +1,7 @@
+# Kokoro (submodulo Git — ver .gitmodules)
+kokoro/.venv/
+kokoro/__pycache__/
+
 # Segredos e ambiente local
 .env
 .env.local

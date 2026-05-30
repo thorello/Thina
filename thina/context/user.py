@@ -111,6 +111,6 @@ def augment_system_instruction(base: str) -> str:
         return base
     return (
         f"{base.rstrip()}\n\n"
-        "Contexto permanente do usuario (sempre considere em todas as respostas):\n"
+        "Contexto permanente do usuário (sempre considere em todas as respostas):\n"
         f"{extra}"
     )

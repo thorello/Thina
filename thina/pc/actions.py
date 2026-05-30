@@ -327,8 +327,8 @@ def _resposta_voz_abertura(result: dict[str, Any]) -> str:
     if result.get("ok"):
         app = result.get("app") or result.get("app_id") or "aplicativo"
         return f"Pronto, abri o {app}."
-    erro = str(result.get("erro", "nao foi possivel abrir"))
-    return f"Desculpe, nao consegui abrir: {erro}"
+    erro = str(result.get("erro", "não foi possível abrir"))
+    return f"Desculpe, não consegui abrir: {erro}"
 
 
 async def try_pc_fastpath(texto: str) -> str | None:
@@ -346,7 +346,7 @@ async def try_pc_fastpath(texto: str) -> str | None:
         logger.warning("Pedido de PC detectado (%s) mas PC_COMMANDS_ENABLED=false", alias)
         return (
             "Para abrir programas no computador, ative PC_COMMANDS_ENABLED=true "
-            "no arquivo .env do servidor Thina e reinicie o servico."
+            "no arquivo .env do servidor Thina e reinicie o serviço."
         )
 
     logger.info("Fast-path PC: abrindo '%s' (texto STT: %s)", alias, texto[:80])

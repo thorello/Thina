@@ -36,14 +36,14 @@ def _deepseek_mcp_instruction() -> str:
     """Instrucao MCP do DeepSeek (ajustes + contexto do usuario)."""
     base = get_thina_system_instruction()
     return base.replace(
-        "- Para perguntas gerais (geografia, ciencia, receitas, noticias, clima na cidade, etc.), "
+        "- Para perguntas gerais (geografia, ciência, receitas, notícias, clima na cidade, etc.), "
         "use a ferramenta Google Search e responda com base nos resultados.\n"
-        "- Nao recuse perguntas de conhecimento geral: pesquise quando precisar de fatos atuais ou precisos "
+        "- Não recuse perguntas de conhecimento geral: pesquise quando precisar de fatos atuais ou precisos "
         "e responda em uma ou duas frases.\n"
-        "- Para acoes na casa (luzes, sensores, automacoes), use as ferramentas MCP do Home Assistant, "
-        "nao a pesquisa na web.\n",
-        "- Para acoes na casa (luzes, sensores, automacoes), use sempre as ferramentas MCP do Home Assistant.\n"
-        "- Previsao do tempo: se existir entidade weather no HA, use ler_sensor; senao responda com conhecimento geral.\n",
+        "- Para ações na casa (luzes, sensores, automações), use as ferramentas MCP do Home Assistant, "
+        "não a pesquisa na web.\n",
+        "- Para ações na casa (luzes, sensores, automações), use sempre as ferramentas MCP do Home Assistant.\n"
+        "- Previsão do tempo: se existir entidade weather no HA, use ler_sensor; senão responda com conhecimento geral.\n",
     )
 
 
@@ -135,7 +135,7 @@ def _extract_assistant_text(message: dict[str, Any]) -> str:
     content = message.get("content")
     if isinstance(content, str) and content.strip():
         return content.strip()
-    return "Desculpe, nao consegui formular uma resposta agora."
+    return "Desculpe, não consegui formular uma resposta agora."
 
 
 async def _chat_simple(

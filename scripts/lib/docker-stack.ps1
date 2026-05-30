@@ -37,6 +37,41 @@ function Get-DockerStackConfig {
     }
 }
 
+function Get-DockerComposeCmd {
+    param(
+        [object]$Cfg,
+        [switch]$UseWsl
+    )
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    if ($UseWsl) {
+        & wsl -d $Cfg.WslDistro bash -lc "docker compose version" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $ErrorActionPreference = $prevEap
+            return "docker compose"
+        }
+        & wsl -d $Cfg.WslDistro bash -lc "docker-compose --version" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $ErrorActionPreference = $prevEap
+            return "docker-compose"
+        }
+        $ErrorActionPreference = $prevEap
+        return "docker-compose"
+    }
+    & docker compose version 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $ErrorActionPreference = $prevEap
+        return @("docker", "compose")
+    }
+    & docker-compose --version 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $ErrorActionPreference = $prevEap
+        return @("docker-compose")
+    }
+    $ErrorActionPreference = $prevEap
+    return @("docker", "compose")
+}
+
 function Invoke-DockerCompose {
     param(
         [object]$Cfg,
@@ -56,12 +91,14 @@ function Invoke-DockerCompose {
             throw "wslpath falhou: $wslRoot"
         }
         $wslRoot = ($wslRoot | Out-String).Trim()
-        $cmd = "cd '$wslRoot' && docker compose " + ($Args -join " ")
+        $composeCmd = Get-DockerComposeCmd -Cfg $Cfg -UseWsl
+        $cmd = "cd '$wslRoot' && $composeCmd " + ($Args -join " ")
         $out = & wsl -d $Cfg.WslDistro bash -lc $cmd 2>&1 | ForEach-Object { "$_" }
     } else {
         Push-Location $Cfg.Root
         try {
-            $out = & docker compose @Args 2>&1 | ForEach-Object { "$_" }
+            $composeCmd = Get-DockerComposeCmd -Cfg $Cfg
+            $out = & @($composeCmd + $Args) 2>&1 | ForEach-Object { "$_" }
         } finally {
             Pop-Location
         }

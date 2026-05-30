@@ -204,17 +204,17 @@ async def controlar_spotify(acao: SpotifyAcao) -> dict[str, Any]:
 
 def _resposta_voz_spotify(result: dict[str, Any]) -> str:
     if not result.get("ok"):
-        erro = str(result.get("erro", "nao foi possivel controlar a musica"))
-        return f"Desculpe, nao consegui controlar o Spotify: {erro}"
+        erro = str(result.get("erro", "não foi possível controlar a música"))
+        return f"Desculpe, não consegui controlar o Spotify: {erro}"
 
     acao = result.get("acao", "")
     mensagens = {
-        "pausar": "Pronto, pausei a musica.",
-        "tocar": "Pronto, continuei a reproducao.",
-        "proxima": "Pulei para a proxima faixa.",
+        "pausar": "Pronto, pausei a música.",
+        "tocar": "Pronto, continuei a reprodução.",
+        "proxima": "Pulei para a próxima faixa.",
         "anterior": "Voltei para a faixa anterior.",
     }
-    return mensagens.get(acao, "Pronto, comando de musica enviado.")
+    return mensagens.get(acao, "Pronto, comando de música enviado.")
 
 
 async def try_spotify_fastpath(texto: str) -> str | None:
@@ -228,7 +228,7 @@ async def try_spotify_fastpath(texto: str) -> str | None:
         logger.warning("Pedido Spotify detectado (%s) mas PC_COMMANDS_ENABLED=false", acao)
         return (
             "Para controlar o Spotify no computador, ative PC_COMMANDS_ENABLED=true "
-            "no arquivo .env do servidor Thina e reinicie o servico."
+            "no arquivo .env do servidor Thina e reinicie o serviço."
         )
 
     logger.info("Fast-path Spotify: %s (texto STT: %s)", acao, texto[:80])

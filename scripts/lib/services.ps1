@@ -111,6 +111,25 @@ function Get-WslExeArgs {
     return $args
 }
 
+function Get-WslDockerComposeCmd {
+    param([object]$Cfg)
+    $wslBase = Get-WslExeArgs $Cfg
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & wsl @wslBase bash -lc "docker compose version" 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $ErrorActionPreference = $prevEap
+        return "docker compose"
+    }
+    & wsl @wslBase bash -lc "docker-compose --version" 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $ErrorActionPreference = $prevEap
+        return "docker-compose"
+    }
+    $ErrorActionPreference = $prevEap
+    return "docker-compose"
+}
+
 function ConvertTo-WslPath {
     param([string]$WindowsPath)
     $resolved = (Resolve-Path $WindowsPath -ErrorAction Stop).Path
@@ -274,11 +293,12 @@ function Start-HomeAssistant {
         Write-Host "  [homeassistant] container em execucao, aguardando HTTP ..."
     } else {
         $wslHaDir = ConvertTo-WslPath $Cfg.HaComposeDir
-        Write-Host "  [homeassistant] docker compose up (WSL) ..."
+        $composeCmd = Get-WslDockerComposeCmd $Cfg
+        Write-Host "  [homeassistant] $composeCmd up (WSL) ..."
         try {
             Invoke-WslCommand -Cfg $Cfg -Command @(
                 "bash", "-lc",
-                "export HA_HOST_PORT=$($Cfg.HaPort); cd '$wslHaDir'; docker compose up -d"
+                "export HA_HOST_PORT=$($Cfg.HaPort); cd '$wslHaDir'; $composeCmd up -d"
             ) | Out-Null
             Write-Host "  [homeassistant] container iniciado" -ForegroundColor Green
         } catch {
@@ -334,9 +354,10 @@ function Stop-HomeAssistant {
             )
             if (($managed | Out-String).Trim()) {
                 $wslHaDir = ConvertTo-WslPath $Cfg.HaComposeDir
+                $composeCmd = Get-WslDockerComposeCmd $Cfg
                 Invoke-WslCommand -Cfg $Cfg -Command @(
                     "bash", "-lc",
-                    "cd '$wslHaDir'; docker compose down"
+                    "cd '$wslHaDir'; $composeCmd down"
                 ) | Out-Null
                 Write-Host "  [homeassistant] compose down ($($Cfg.HaContainer))" -ForegroundColor Green
                 $stopped = $true
@@ -490,6 +511,22 @@ function Start-ManagedProcess {
     return $proc.Id
 }
 
+function Get-NpmCmdPath {
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not $base) { continue }
+        $npmCmd = Join-Path $base "nodejs\npm.cmd"
+        if (Test-Path $npmCmd) { return $npmCmd }
+    }
+    $node = Get-Command node -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notmatch 'cursor' } |
+        Select-Object -First 1
+    if ($node) {
+        $npmCmd = Join-Path (Split-Path $node.Source -Parent) "npm.cmd"
+        if (Test-Path $npmCmd) { return $npmCmd }
+    }
+    throw "npm.cmd nao encontrado. Instale Node.js (nodejs.org) e reinicie o terminal."
+}
+
 function Ensure-ThinaUiDependencies {
     param([object]$Cfg)
     $uiDir = Join-Path $cfg.Root "ui"
@@ -514,10 +551,10 @@ function Start-ThinaUiDev {
     }
 
     Ensure-ThinaUiDependencies $Cfg
-    $npm = (Get-Command npm -ErrorAction Stop).Source
+    $npm = Get-NpmCmdPath
     Start-ManagedProcess `
         -Name "thina-ui" `
-        -WorkingDirectory $Cfg.Root `
+        -WorkingDirectory (Join-Path $Cfg.Root "ui") `
         -Executable $npm `
         -Arguments @("run", "dev") `
         -RunDir $Cfg.RunDir `

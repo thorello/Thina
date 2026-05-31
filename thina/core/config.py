@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     google_credentials_file: str = "data/google_credentials.json"
     google_token_file: str = "data/google_token.json"
     google_timezone: str = "America/Sao_Paulo"
+    # URI de callback OAuth no navegador (vazio = http://127.0.0.1:<THINA_PORT>/v1/google/oauth/callback)
+    google_oauth_redirect_uri: str = ""
 
     # Mapas e MCP
     areas_map_file: str = "maps/areas.json"

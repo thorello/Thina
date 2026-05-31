@@ -1,15 +1,18 @@
 """
 Integracao OAuth com Gmail, Google Drive e Google Calendar.
 
-Fluxo inicial: credenciais OAuth (Desktop) em data/google_credentials.json,
-autorizacao via scripts/google_auth.py, token em data/google_token.json.
+Credenciais OAuth em data/google_credentials.json ou GOOGLE_CLIENT_* no .env;
+autorizacao via /v1/google/setup, token em data/google_token.json.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
+import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -52,11 +55,23 @@ def token_path() -> Path:
     return _resolve_path(get_settings().google_token_file)
 
 
+def _credentials_json_valid() -> bool:
+    path = credentials_path()
+    if not path.is_file() or path.stat().st_size < 20:
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    block = data.get("installed") or data.get("web") or data
+    return bool(block.get("client_id") and block.get("client_secret"))
+
+
 def is_google_configured() -> bool:
     settings = get_settings()
     if not settings.google_enabled:
         return False
-    if credentials_path().exists():
+    if _credentials_json_valid():
         return True
     return bool(settings.google_client_id.strip() and settings.google_client_secret.strip())
 
@@ -93,18 +108,71 @@ def _require_configured() -> None:
     raise GoogleNotConfiguredError(
         f"Credenciais OAuth ausentes. Coloque o JSON em {credentials_path()} "
         "ou defina GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no .env, "
-        "depois rode scripts/google_auth.py."
+        "depois abra /v1/google/setup para conectar a conta."
     )
 
 
-def _oauth_flow():
-    from google_auth_oauthlib.flow import InstalledAppFlow
+def oauth_redirect_uri() -> str:
+    """URL onde o Google redireciona apos o usuario autorizar (loopback no host)."""
+    settings = get_settings()
+    custom = settings.google_oauth_redirect_uri.strip()
+    if custom:
+        return custom
+    return f"http://127.0.0.1:{settings.thina_port}/v1/google/oauth/callback"
+
+
+def _oauth_flow(*, redirect_uri: str | None = None):
+    from google_auth_oauthlib.flow import Flow
 
     _require_configured()
     client_config = _client_config_from_env()
     if client_config:
-        return InstalledAppFlow.from_client_config(client_config, SCOPES)
-    return InstalledAppFlow.from_client_secrets_file(str(credentials_path()), SCOPES)
+        flow = Flow.from_client_config(client_config, SCOPES)
+    else:
+        flow = Flow.from_client_secrets_file(str(credentials_path()), SCOPES)
+    if redirect_uri:
+        flow.redirect_uri = redirect_uri
+    return flow
+
+
+_oauth_pending: dict[str, float] = {}
+_OAUTH_STATE_TTL = 600.0
+
+
+def _cleanup_oauth_pending() -> None:
+    now = time.time()
+    expired = [state for state, expiry in _oauth_pending.items() if expiry <= now]
+    for state in expired:
+        _oauth_pending.pop(state, None)
+
+
+def begin_web_oauth() -> str:
+    """Inicia OAuth via navegador; retorna URL de autorizacao do Google."""
+    redirect_uri = oauth_redirect_uri()
+    flow = _oauth_flow(redirect_uri=redirect_uri)
+    state = secrets.token_urlsafe(32)
+    _cleanup_oauth_pending()
+    _oauth_pending[state] = time.time() + _OAUTH_STATE_TTL
+    url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        state=state,
+    )
+    return url
+
+
+def complete_web_oauth(*, state: str, code: str) -> None:
+    """Conclui OAuth apos redirect do Google e salva o token."""
+    _cleanup_oauth_pending()
+    expiry = _oauth_pending.pop(state, None)
+    if expiry is None or expiry <= time.time():
+        raise GoogleAuthError("Sessao de autorizacao expirada. Tente conectar de novo.")
+
+    redirect_uri = oauth_redirect_uri()
+    flow = _oauth_flow(redirect_uri=redirect_uri)
+    flow.fetch_token(code=code)
+    save_token_sync(flow.credentials)
 
 
 def _credentials_have_scopes(creds: Any) -> bool:
@@ -138,7 +206,7 @@ def _load_credentials_sync():
         if not _credentials_have_scopes(creds):
             raise GoogleAuthError(
                 "Token Google com permissoes antigas. Apague data/google_token.json "
-                "e rode: python scripts/google_auth.py"
+                "e reconecte em /v1/google/setup"
             )
 
     if creds and creds.valid:
@@ -150,7 +218,7 @@ def _load_credentials_sync():
         return creds
 
     raise GoogleAuthError(
-        "Conta Google nao autorizada. Rode: python scripts/google_auth.py"
+        "Conta Google nao autorizada. Abra /v1/google/setup para conectar."
     )
 
 
@@ -158,14 +226,6 @@ def save_token_sync(creds: Any) -> None:
     path = token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(creds.to_json(), encoding="utf-8")
-
-
-def run_oauth_flow_sync() -> None:
-    """Abre o navegador para autorizar e salva o token."""
-    flow = _oauth_flow()
-    creds = flow.run_local_server(port=0)
-    save_token_sync(creds)
-    logger.info("Token Google salvo em %s", token_path())
 
 
 def _build_service(api: str, version: str):
@@ -514,10 +574,12 @@ def google_status() -> dict[str, Any]:
     settings = get_settings()
     return {
         "enabled": settings.google_enabled,
-        "credentials_file": credentials_path().exists(),
+        "credentials_file": _credentials_json_valid(),
         "client_env": bool(settings.google_client_id.strip() and settings.google_client_secret.strip()),
         "configured": is_google_configured(),
         "authorized": is_google_authorized(),
         "needs_reauth": needs_reauth() if is_google_authorized() else False,
         "scopes": list(SCOPES),
+        "setup_url": f"http://127.0.0.1:{settings.thina_port}/v1/google/setup",
+        "oauth_redirect_uri": oauth_redirect_uri(),
     }

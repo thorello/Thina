@@ -16,11 +16,12 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from thina.api.google_setup import render_google_setup_page
 from thina.api.schemas import (
     ConversarRequest,
     ConversarResponse,
@@ -34,6 +35,15 @@ from thina.core.tts_settings import (
     voice_label,
 )
 from thina.core.conversation import append_turn, clear_session, get_historico
+from thina.integrations.google import (
+    GoogleAuthError,
+    GoogleNotConfiguredError,
+    begin_web_oauth,
+    complete_web_oauth,
+    google_status,
+    needs_reauth,
+    token_path,
+)
 from thina.integrations.homeassistant import (
     HAAuthError,
     HAConnectionError,
@@ -148,6 +158,71 @@ async def root():
         "docs": "/docs",
         "ui": "Execute npm run build em ui/ e reinicie o servidor.",
     }
+
+
+@app.get("/v1/google/status")
+async def google_integration_status() -> dict:
+    """Estado da integracao Google (Gmail, Drive, Calendar)."""
+    return google_status()
+
+
+@app.get("/v1/google/setup", response_class=HTMLResponse)
+async def google_setup_page(
+    ok: int | None = Query(default=None),
+    error: str | None = Query(default=None),
+) -> HTMLResponse:
+    """Pagina amigavel para conectar a conta Google (sem linha de comando)."""
+    result = "ok" if ok else None
+    return HTMLResponse(render_google_setup_page(result=result, error=error))
+
+
+@app.get("/v1/google/connect")
+async def google_connect(force: bool = Query(default=False)) -> RedirectResponse:
+    """Redireciona o navegador para autorizacao Google."""
+    status = google_status()
+    if not status["enabled"]:
+        return RedirectResponse(
+            url="/v1/google/setup?error=Integracao+Google+desativada",
+            status_code=302,
+        )
+    if not status["configured"]:
+        return RedirectResponse(
+            url="/v1/google/setup?error=Credenciais+OAuth+nao+configuradas",
+            status_code=302,
+        )
+    if force or needs_reauth():
+        token_path().unlink(missing_ok=True)
+    try:
+        url = begin_web_oauth()
+    except (GoogleNotConfiguredError, GoogleAuthError) as exc:
+        msg = str(exc).replace(" ", "+")
+        return RedirectResponse(url=f"/v1/google/setup?error={msg}", status_code=302)
+    return RedirectResponse(url=url, status_code=302)
+
+
+@app.get("/v1/google/oauth/callback")
+async def google_oauth_callback(
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+) -> RedirectResponse:
+    """Callback OAuth apos o usuario autorizar no Google."""
+    if error:
+        return RedirectResponse(
+            url=f"/v1/google/setup?error={error.replace(' ', '+')}",
+            status_code=302,
+        )
+    if not code or not state:
+        return RedirectResponse(
+            url="/v1/google/setup?error=Resposta+incompleta+do+Google",
+            status_code=302,
+        )
+    try:
+        complete_web_oauth(state=state, code=code)
+    except GoogleAuthError as exc:
+        msg = str(exc).replace(" ", "+")
+        return RedirectResponse(url=f"/v1/google/setup?error={msg}", status_code=302)
+    return RedirectResponse(url="/v1/google/setup?ok=1", status_code=302)
 
 
 @app.get("/health")

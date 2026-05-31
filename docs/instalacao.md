@@ -195,7 +195,7 @@ O `area_id` enviado pelo Home Assistant deve corresponder a uma chave deste fich
 ### Próximos passos
 
 - **ReSpeaker / voz por cômodo:** [integracao-respeaker-lite.md](./integracao-respeaker-lite.md)
-- **Gmail, Drive, Calendar:** [integracao-google.md](./integracao-google.md)
+- **Gmail, Drive, Calendar:** [integracao-google.md](./integracao-google.md) — quem usa: duplo clique em `configurar-google.bat` (Windows) ou `./scripts/setup_google.sh`
 
 ---
 

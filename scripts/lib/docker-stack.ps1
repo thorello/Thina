@@ -135,9 +135,24 @@ function Test-DockerStackImagesMissing {
     }
 }
 
+function Ensure-GoogleDockerFiles {
+    param([string]$Root)
+    $dataDir = Join-Path $Root "data"
+    if (-not (Test-Path $dataDir)) {
+        New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+    }
+    foreach ($name in @("google_credentials.json", "google_token.json")) {
+        $path = Join-Path $dataDir $name
+        if (-not (Test-Path $path)) {
+            "{}" | Set-Content -Path $path -Encoding UTF8 -NoNewline
+        }
+    }
+}
+
 function Start-DockerStack {
     param([switch]$Build)
     $cfg = Get-DockerStackConfig
+    Ensure-GoogleDockerFiles -Root $cfg.Root
     Write-Host "`n=== Subindo stack Docker (HA + Kokoro + Thina) ===" -ForegroundColor Cyan
     Write-Host "Raiz: $($cfg.Root)"
     if ($cfg.UseWsl) {

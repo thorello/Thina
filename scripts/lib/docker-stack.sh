@@ -35,6 +35,15 @@ _invoke_compose() {
   )
 }
 
+_ensure_google_docker_files() {
+  mkdir -p "$DOCKER_STACK_ROOT/data"
+  for f in google_credentials.json google_token.json; do
+    if [[ ! -f "$DOCKER_STACK_ROOT/data/$f" ]]; then
+      echo "{}" > "$DOCKER_STACK_ROOT/data/$f"
+    fi
+  done
+}
+
 start_docker_stack() {
   local build=false
   for arg in "$@"; do
@@ -42,6 +51,8 @@ start_docker_stack() {
       --build) build=true ;;
     esac
   done
+
+  _ensure_google_docker_files
 
   echo ""
   echo "=== Subindo stack Docker (HA + Kokoro + Thina) ==="

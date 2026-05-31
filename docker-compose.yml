@@ -65,6 +65,8 @@ services:
       - ./maps:/app/maps
       - ./data/audio:/app/data/audio
       - ./data/tts_settings.json:/app/data/tts_settings.json
+      - ./data/google_credentials.json:/app/data/google_credentials.json
+      - ./data/google_token.json:/app/data/google_token.json
     depends_on:
       kokoro:
         condition: service_healthy

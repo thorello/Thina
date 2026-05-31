@@ -109,6 +109,13 @@ def test_env(
         str(tmp_path / "inexistente.private.md"),
     )
 
+    # Isola do .env do desenvolvedor (ex.: GOOGLE_ENABLED=true)
+    monkeypatch.setenv("GOOGLE_ENABLED", "false")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "")
+    monkeypatch.setenv("GOOGLE_CREDENTIALS_FILE", str(tmp_path / "google_credentials.json"))
+    monkeypatch.setenv("GOOGLE_TOKEN_FILE", str(tmp_path / "google_token.json"))
+
 
 @pytest.fixture
 def client(test_env: None) -> Iterator:

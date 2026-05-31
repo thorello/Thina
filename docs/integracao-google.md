@@ -1,69 +1,75 @@
 # Integração Google (Gmail, Drive, Calendar)
 
-A Thina acessa sua conta Google via OAuth2: ler emails, abrir arquivos no Drive, criar eventos na agenda e enviar emails.
+A Thina acessa Gmail, Drive e Agenda via OAuth2.
 
 > Pré-requisito: Thina instalada — [instalacao.md](./instalacao.md).
 
-## 1. Google Cloud Console
+---
 
-1. Crie um projeto (ou use um existente) em [Google Cloud Console](https://console.cloud.google.com/).
+## Para quem vai usar (sem conhecimento técnico)
+
+Depois que quem instalou a Thina terminou a configuração, **só precisa disto**:
+
+### Windows
+
+1. Dê **duplo clique** em `configurar-google.bat` na pasta do projeto  
+   **ou** execute `.\scripts\setup_google.ps1`
+2. Abre uma página no navegador — clique em **Conectar conta Google**
+3. Entre com sua conta Gmail e toque em **Permitir**
+4. Pronto. Teste por voz: *"Thina, tenho email novo no Gmail?"*
+
+### Mac / Linux
+
+```bash
+chmod +x scripts/setup_google.sh
+./scripts/setup_google.sh
+```
+
+Siga os passos na página que abrir no navegador.
+
+### Link direto (se a Thina já estiver rodando)
+
+Abra no navegador: **http://localhost:8080/v1/google/setup**
+
+---
+
+## Para quem instala (uma vez por casa)
+
+O Google exige um **aplicativo OAuth** no Cloud Console. Faça isto **uma vez**; depois pode copiar o mesmo `.env` (ou o JSON) para outras instalações da mesma casa.
+
+### 1. Google Cloud Console
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → crie um projeto (ex.: `Thina Casa`)
 2. Ative as APIs:
-   - Gmail API
-   - Google Drive API
-   - Google Calendar API
-3. **OAuth consent screen**: tipo *External* (ou Internal se for Workspace), adicione seu email como test user se estiver em modo teste.
-4. **Credentials** → *Create credentials* → *OAuth client ID* → tipo **Desktop app**.
-5. Baixe o JSON e salve como `data/google_credentials.json` na raiz do repositório.
-
-## 2. Configurar o `.env`
+   - [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
+   - [Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)
+   - [Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com)
+3. **OAuth consent screen** → tipo *External* → adicione o email de quem vai usar como **Test user** (modo teste)
+4. **Credentials** → *Create credentials* → *OAuth client ID* → tipo **Desktop app**
+5. Copie **Client ID** e **Client Secret** para o `.env`:
 
 ```env
 GOOGLE_ENABLED=true
-# GOOGLE_TIMEZONE=America/Sao_Paulo
-# GOOGLE_CREDENTIALS_FILE=data/google_credentials.json
-# GOOGLE_TOKEN_FILE=data/google_token.json
+GOOGLE_CLIENT_ID=123456789-xxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxx
 ```
 
-## 3. Autorizar a conta
+**Alternativa:** baixe o JSON e salve como `data/google_credentials.json`.
 
-No **host** onde você edita arquivos do projeto (não dentro do container). Com venv do instalador:
+> **Dica:** guarde uma cópia deste `.env` (sem chaves LLM) num pendrive — ao instalar para outra pessoa, só falta ela autorizar a conta dela no passo “Para quem vai usar”.
 
-Windows:
+### 2. Subir a Thina e conectar
 
 ```powershell
-.\.venv\Scripts\python scripts/google_auth.py
+.\start-docker.ps1
+.\scripts\setup_google.ps1
 ```
 
-macOS / Linux:
+Os volumes Google já estão no `docker-compose.yml` — não é preciso editar o compose.
 
-```bash
-.venv/bin/python scripts/google_auth.py
-```
+---
 
-Se as permissões mudarem (ex.: de somente leitura para enviar email/criar eventos):
-
-```powershell
-# Windows
-.\.venv\Scripts\python scripts/google_auth.py --force
-```
-
-```bash
-# macOS / Linux
-.venv/bin/python scripts/google_auth.py --force
-```
-
-O navegador abre para você conceder acesso. O token fica em `data/google_token.json` (gitignore).
-
-**Stack Docker:** gere o token no host (comandos acima). Para o container enxergar os ficheiros, adicione volumes em `docker-compose.yml` (serviço `thina`):
-
-```yaml
-      - ./data/google_credentials.json:/app/data/google_credentials.json
-      - ./data/google_token.json:/app/data/google_token.json
-```
-
-Reinicie: `docker compose restart thina`. No Windows, alternativa guiada: `.\scripts\setup_google.ps1`.
-
-## 4. O que você pode pedir por voz
+## O que você pode pedir por voz
 
 | Ação | Exemplo |
 |------|---------|
@@ -95,6 +101,20 @@ Reinicie: `docker compose restart thina`. No Windows, alternativa guiada: `.\scr
 | Gmail     | `gmail.modify`      | Ler, enviar, marcar lido |
 | Drive     | `drive.readonly`    | Listar, ler, abrir links |
 | Calendar  | `calendar.events`   | Criar e gerenciar eventos |
+
+## Avançado
+
+### Reautorizar (permissões novas)
+
+Na página http://localhost:8080/v1/google/setup → **Reconectar outra conta** (ou apague `data/google_token.json` e conecte de novo).
+
+### URI de callback personalizada
+
+Se a Thina não usar a porta 8080:
+
+```env
+GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8081/v1/google/oauth/callback
+```
 
 ## Segurança
 

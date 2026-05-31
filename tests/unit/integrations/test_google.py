@@ -34,7 +34,10 @@ def google_env(
 ) -> tuple[Path, Path]:
     creds = tmp_path / "google_credentials.json"
     token = tmp_path / "google_token.json"
-    creds.write_text('{"installed": {"client_id": "x"}}', encoding="utf-8")
+    creds.write_text(
+        '{"installed": {"client_id": "x", "client_secret": "y", "redirect_uris": ["http://localhost"]}}',
+        encoding="utf-8",
+    )
     token.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("GOOGLE_ENABLED", "true")
     monkeypatch.setenv("GOOGLE_CREDENTIALS_FILE", str(creds))

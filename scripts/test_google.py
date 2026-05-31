@@ -29,7 +29,7 @@ async def main() -> int:
         return 1
 
     if not is_google_authorized():
-        print("ERRO: Token ausente. Rode: python scripts/google_auth.py")
+        print("ERRO: Token ausente. Abra http://localhost:8080/v1/google/setup")
         return 1
 
     print("\n--- Gmail (3 recentes) ---")

@@ -2,11 +2,11 @@
 
 Guia para ligar vários **ReSpeaker Lite Voice Assistant Kit** ao **thina-server**, usando o Home Assistant como ponte (STT no satélite → Thina → áudio no mesmo satélite).
 
-> **Instalação da stack:** se ainda não subiu HA + Kokoro + Thina, comece por [instalacao.md](./instalacao.md).
+> **Instalação da stack:** se ainda não subiu HA + Kokoro + Thina, comece por [instalacao.md](../instalacao.md).
 >
 > **Portas:** na **stack Docker** (guia de instalação), a Thina fica em **`:8080`**. O **`:8081`** aparece neste doc sobretudo no **modo nativo Windows** (conflito `wslrelay` com porta 8080). Ajuste URLs nos exemplos conforme o seu modo.
 
-Relacionado: [relatorio-fluxo-servicos.md](./relatorio-fluxo-servicos.md)
+Relacionado: [fluxo-servicos.md](../referencia/fluxo-servicos.md)
 
 ---
 
@@ -91,7 +91,7 @@ Teste de som no HA (antes do Thina):
 
 ## Fase 2 — Mapa no thina-server
 
-Edite [`maps/areas.json`](../maps/areas.json). A **chave** deve ser o identificador de área que o HA enviará; o **valor** é o `media_player` real:
+Edite [`maps/areas.json`](../../maps/areas.json). A **chave** deve ser o identificador de área que o HA enviará; o **valor** é o `media_player` real:
 
 ```json
 {
@@ -113,7 +113,7 @@ O Home Assistant precisa **baixar o WAV** gerado pelo Thina.
 
 | Cenário | `THINA_PUBLIC_URL` | Porta Thina |
 |---------|-------------------|-------------|
-| **Stack Docker unificada** ([instalacao.md](./instalacao.md)) | `http://thina:8080` (já no compose) | **8080** |
+| **Stack Docker unificada** ([instalacao.md](../instalacao.md)) | `http://thina:8080` (já no compose) | **8080** |
 | HA em Docker no mesmo PC, Thina **nativo** Windows | `http://host.docker.internal:8081` | **8081** (evita conflito WSL) |
 | HA noutro host na LAN | `http://<IP-do-PC-Thina>:8080` ou `:8081` | conforme `.env` |
 
@@ -295,9 +295,10 @@ Deve ouvir-se no ReSpeaker do quarto e ver `"media_player": "media_player...._qu
 
 | Ficheiro | Conteúdo |
 |----------|----------|
-| [maps/areas.json](../maps/areas.json) | Cômodo → `media_player` |
-| [README.md](../README.md) | API `/v1/conversar` |
-| [relatorio-fluxo-servicos.md](./relatorio-fluxo-servicos.md) | Entradas/saídas por serviço |
-| [scripts/test_app.py](../scripts/test_app.py) | Teste integrado |
+| [maps/areas.json](../../maps/areas.json) | Cômodo → `media_player` |
+| [README.md](../../README.md) | API `/v1/conversar` |
+| [fluxo-servicos.md](../referencia/fluxo-servicos.md) | Entradas/saídas por serviço |
+| [home-assistant/thina_respeaker.yaml](./home-assistant/thina_respeaker.yaml) | Automação HA (exemplo) |
+| [scripts/test_app.py](../../scripts/test_app.py) | Teste integrado |
 
 Documentação Seeed (hardware): consulte o manual do **ReSpeaker Lite Voice Assistant Kit** (QR na caixa) para URLs atualizados de firmware e ESPHome.

@@ -1,5 +1,5 @@
 """
 Pacote legado (compatibilidade).
 
-Codigo novo: use o pacote thina/ (ver AGENTS.md na raiz).
+Codigo novo: use o pacote thina/ (ver AGENTS.md e services/README.md).
 """

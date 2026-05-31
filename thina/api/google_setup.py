@@ -24,7 +24,7 @@ def _status_badge(status: dict) -> tuple[str, str, str]:
         return (
             "Falta configuracao",
             "Quem instalou a Thina precisa colocar as credenciais OAuth uma vez "
-            "(veja docs/integracao-google.md — secao Instalador).",
+            "(veja docs/integracao/google.md — secao Instalador).",
             "warn",
         )
     if status["authorized"] and not status["needs_reauth"]:

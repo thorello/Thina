@@ -2,7 +2,7 @@
 
 A Thina acessa Gmail, Drive e Agenda via OAuth2.
 
-> Pré-requisito: Thina instalada — [instalacao.md](./instalacao.md).
+> Pré-requisito: Thina instalada — [instalacao.md](../instalacao.md).
 
 ---
 

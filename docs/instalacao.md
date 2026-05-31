@@ -194,8 +194,8 @@ O `area_id` enviado pelo Home Assistant deve corresponder a uma chave deste fich
 
 ### Próximos passos
 
-- **ReSpeaker / voz por cômodo:** [integracao-respeaker-lite.md](./integracao-respeaker-lite.md)
-- **Gmail, Drive, Calendar:** [integracao-google.md](./integracao-google.md) — quem usa: duplo clique em `configurar-google.bat` (Windows) ou `./scripts/setup_google.sh`
+- **ReSpeaker / voz por cômodo:** [integracao/respeaker-lite.md](./integracao/respeaker-lite.md)
+- **Gmail, Drive, Calendar:** [integracao/google.md](./integracao/google.md) — quem usa: duplo clique em `configurar-google.bat` (Windows) ou `./scripts/setup_google.sh`
 
 ---
 
@@ -266,7 +266,7 @@ Para **desenvolvimento** ou **comandos no PC** (`PC_COMMANDS_ENABLED=true`):
 
 Requisitos: WSL com `docker` funcional (`wsl docker version`). Para desativar HA gerido: `HOME_ASSISTANT_MANAGED=false`.
 
-**Conflito porta 8080:** no Windows, `localhost:8080` pode ser capturado pelo `wslrelay`. Use `THINA_PORT=8081` no `.env`. Detalhes: [relatorio-fluxo-servicos.md](./relatorio-fluxo-servicos.md).
+**Conflito porta 8080:** no Windows, `localhost:8080` pode ser capturado pelo `wslrelay`. Use `THINA_PORT=8081` no `.env`. Detalhes: [referencia/fluxo-servicos.md](./referencia/fluxo-servicos.md).
 
 Parar / status:
 

@@ -1,5 +1,7 @@
 # Thina — Servidor central do assistente de voz residencial
 
+> **Agentes de IA (Cursor, etc.):** comece por **[AGENTS.md](AGENTS.md)** — mapa do código, fluxo da requisição e restrições. Documentação humana: **[docs/README.md](docs/README.md)**.
+
 Servidor Python (FastAPI) que recebe texto do Home Assistant (após STT local com Whisper), processa com **Gemini 1.5 Flash** e ferramentas **MCP** para controlar a casa, sintetiza a resposta com **Kokoro TTS** e reproduz o áudio no **ReSpeaker** do cômodo de origem.
 
 ## Arquitetura
@@ -48,7 +50,7 @@ chmod +x install.sh start-docker.sh stop-docker.sh
 
 Após subir: onboarding do HA em `:8123`, token long-lived em `HOME_ASSISTANT_TOKEN`, `docker compose restart thina`.
 
-Integração ReSpeaker: [docs/integracao-respeaker-lite.md](docs/integracao-respeaker-lite.md).
+Integração ReSpeaker: [docs/integracao/respeaker-lite.md](docs/integracao/respeaker-lite.md).
 
 ## Configuração
 
@@ -249,25 +251,19 @@ curl -X POST http://localhost:8080/v1/conversar `
 
 ## Estrutura do projeto
 
+Resumo; layout completo e mapa de tarefas: **[AGENTS.md](AGENTS.md)**.
+
 ```
 thina-server/
-├── AGENTS.md          # mapa para agentes de IA (Cursor, etc.)
+├── AGENTS.md          # entrada para agentes de IA
+├── docs/              # instalacao, integracao/, referencia/ — ver docs/README.md
 ├── main.py            # entrada uvicorn (main:app)
-├── thina/             # pacote Python principal
-│   ├── api/           # FastAPI (/v1/conversar, /health)
-│   ├── core/          # config, historico de sessao
-│   ├── context/       # maps/*.md do usuario
-│   ├── speech/        # texto -> TTS
-│   ├── integrations/  # Home Assistant, Kokoro
-│   ├── llm/           # Gemini/DeepSeek + MCP
-│   └── pc/            # apps/sites/Spotify no Windows
+├── thina/             # pacote Python principal (edite aqui)
 ├── maps/              # areas, pc_apps, personalidade
-├── data/audio/        # WAV temporarios
-├── services/          # shims legados (compatibilidade)
-└── tests/             # unit/ + api/
+├── scripts/           # operacao; atalhos *.ps1 na raiz
+├── services/          # shims legados — ver services/README.md
+└── tests/             # unit/ + api/ (espelha thina/)
 ```
-
-Detalhes para desenvolvimento assistido por IA: [AGENTS.md](AGENTS.md).
 
 ## Notas
 

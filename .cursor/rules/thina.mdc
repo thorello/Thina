@@ -1,0 +1,12 @@
+---
+description: Thina — consulte AGENTS.md antes de editar o repositório
+alwaysApply: true
+---
+
+# Thina Server
+
+1. Leia [AGENTS.md](../../AGENTS.md) para localizar módulos, fluxo da requisição e restrições.
+2. Código novo em `thina/`; não altere lógica em `services/` nem `config.py` (shims).
+3. Documentação em `docs/` — índice em [docs/README.md](../../docs/README.md).
+4. Não altere o contrato JSON de `POST /v1/conversar` nem nomes de ferramentas MCP sem pedido explícito.
+5. Caminhos fixos: `maps/`, `data/audio/` (relativos à raiz do repo).

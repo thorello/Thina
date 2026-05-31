@@ -77,7 +77,7 @@ if [[ "$has_creds_file" != true && "$has_env_creds" != true ]]; then
   echo "  2. GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET no .env"
   echo "     OU JSON em data/google_credentials.json"
   echo ""
-  echo "Guia: docs/integracao-google.md (secao Instalador)"
+  echo "Guia: docs/integracao/google.md (secao Instalador)"
   read -r -p "Caminho do JSON baixado (Enter para pular): " json_path
   if [[ -n "${json_path:-}" && -f "$json_path" ]]; then
     cp "$json_path" "$CREDS_FILE"

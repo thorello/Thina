@@ -81,11 +81,11 @@ if (-not $hasCredsFile -and -not $hasEnvCreds) {
     Write-Host "  2. Colocar GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no .env"
     Write-Host "     OU salvar o JSON em data\google_credentials.json"
     Write-Host ""
-    Write-Host "Guia completo: docs\integracao-google.md (secao Instalador)"
+    Write-Host "Guia completo: docs\integracao\google.md (secao Instalador)"
     Write-Host ""
     $openDoc = Read-Host "Abrir guia do instalador no navegador? (S/n)"
     if ($openDoc -ne "n" -and $openDoc -ne "N") {
-        Start-Process "https://github.com/thorello/Thina/blob/main/docs/integracao-google.md"
+        Start-Process "https://github.com/thorello/Thina/blob/main/docs/integracao/google.md"
     }
     $jsonPath = Read-Host "Caminho do JSON baixado do Google (Enter para pular)"
     if ($jsonPath -and (Test-Path $jsonPath)) {

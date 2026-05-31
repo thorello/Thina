@@ -17,6 +17,11 @@ if (-not (Test-Path $kokoroApp)) {
     & "$PSScriptRoot\install.ps1" -DockerOnly
 }
 
+if (-not $Build -and (Test-DockerStackImagesMissing)) {
+    Write-Host "Imagens Docker ainda nao existem — build automatico na primeira execucao." -ForegroundColor Yellow
+    $Build = $true
+}
+
 try {
     Start-DockerStack -Build:$Build
     exit 0

@@ -6,8 +6,8 @@ Assistente de voz residencial: **Home Assistant (STT)** → **este servidor (LLM
 
 | Tarefa | Arquivo / pasta |
 |--------|-----------------|
-| Stack Docker (HA + Kokoro + Thina) | `docker-compose.yml`, `Dockerfile`, `start-docker.ps1` |
-| Instalação inicial | `install.ps1` / `install.sh` (submódulo `kokoro/`) |
+| **Instalação (Docker Windows/Mac)** | [`docs/instalacao.md`](docs/instalacao.md), `install.ps1` / `install.sh` |
+| Stack Docker (HA + Kokoro + Thina) | `docker-compose.yml`, `Dockerfile`, `start-docker.ps1`, `start-docker.sh` |
 | Endpoint principal `POST /v1/conversar` | `thina/api/app.py` |
 | Painel WebGL (UI) | `ui/` → build → `/ui/` no FastAPI |
 | Variáveis de ambiente e caminhos | `thina/core/config.py` (`.env` na raiz) |

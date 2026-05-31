@@ -37,6 +37,8 @@ data/run/*
 !data/run/.gitkeep
 data/homeassistant/*
 !data/homeassistant/.gitkeep
+data/google_credentials.json
+data/google_token.json
 data/*.log
 *.wav
 *.mp3
@@ -59,3 +61,6 @@ ui/dist/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+data/google_credentials.json
+data/google_token.json

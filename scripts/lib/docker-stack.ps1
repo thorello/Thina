@@ -112,6 +112,29 @@ function Invoke-DockerCompose {
     return $out
 }
 
+function Test-DockerStackImagesMissing {
+    $cfg = Get-DockerStackConfig
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $images = docker images --format "{{.Repository}}" 2>$null
+        if ($cfg.UseWsl) {
+            $images = & wsl -d $cfg.WslDistro bash -lc "docker images --format '{{.Repository}}'" 2>$null
+        }
+        if (-not $images) { return $true }
+        $hasThina = $false
+        $hasKokoro = $false
+        foreach ($line in ($images -split "`n")) {
+            $repo = $line.Trim()
+            if ($repo -eq 'thina-thina') { $hasThina = $true }
+            if ($repo -eq 'thina-kokoro') { $hasKokoro = $true }
+        }
+        return -not ($hasThina -and $hasKokoro)
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 function Start-DockerStack {
     param([switch]$Build)
     $cfg = Get-DockerStackConfig

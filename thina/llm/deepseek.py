@@ -22,9 +22,8 @@ from thina.llm.gemini_mcp import (
     get_thina_chat_instruction,
     get_thina_system_instruction,
     _build_user_prompt,
-    _needs_home_tools,
+    _mcp_mode_label,
     _needs_mcp_tools,
-    _needs_pc_tools,
 )
 from thina.integrations.homeassistant import HAAuthError, HAConnectionError
 
@@ -226,15 +225,7 @@ async def processar_mensagem_deepseek(
 
     usar_mcp = _needs_mcp_tools(texto)
     messages = _messages_for_request(texto, area_id, historico, usar_mcp=usar_mcp)
-    if usar_mcp:
-        if _needs_pc_tools(texto) and _needs_home_tools(texto):
-            modo = "MCP (casa + PC)"
-        elif _needs_pc_tools(texto):
-            modo = "MCP (PC)"
-        else:
-            modo = "MCP (casa)"
-    else:
-        modo = "chat"
+    modo = _mcp_mode_label(texto) if usar_mcp else "chat"
     logger.info(
         "Processando com DeepSeek (%s) | modo=%s | texto=%s",
         settings.deepseek_model,

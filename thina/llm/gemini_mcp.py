@@ -92,6 +92,11 @@ Conhecimento e pesquisa:
 - Para abrir programas no PC (Chrome, Spotify, Calculadora do Windows, etc.) ou sites na web, use abrir_aplicativo e abrir_site — apenas apps da lista permitida.
 - Para pausar, retomar, pular ou voltar música no Spotify do PC, use controlar_spotify (pausar, tocar, proxima, anterior).
 - "Abrir a calculadora" / "abre a calculadora" significa o aplicativo Calculadora do Windows, NÃO fazer contas matemáticas.
+- Para emails do Gmail, arquivos do Google Drive e eventos do Google Calendar da conta do usuário, use as ferramentas Google MCP.
+- Leitura: listar_emails_gmail, ler_email_gmail, listar_arquivos_drive, ler_arquivo_drive, listar_eventos_agenda.
+- Ações: abrir_arquivo_drive (abre no navegador), criar_evento_agenda (inicio/fim em ISO, ex: 2026-06-01T16:00:00), enviar_email_gmail, marcar_email_lido.
+- Antes de enviar email ou criar evento, confirme titulo, destinatario ou horario se o pedido for ambiguo.
+- Resuma emails e documentos em voz: cite remetente, assunto e o essencial; não leia listas longas nem URLs inteiras.
 
 Regras:
 - O usuário fala a partir de um cômodo específico (area_id); considere isso no contexto.
@@ -312,6 +317,199 @@ async def abrir_site(url: str, navegador: str | None = None) -> str:
     return _json_result(result)
 
 
+@mcp.tool
+async def listar_emails_gmail(
+    consulta: str = "",
+    max_resultados: int = 10,
+) -> str:
+    """
+    Lista emails recentes do Gmail do usuario.
+
+    Args:
+        consulta: Filtro Gmail (ex: is:unread, from:fulano@gmail.com, subject:conta).
+        max_resultados: Quantidade maxima de mensagens (1-20).
+    """
+    from thina.integrations.google import GoogleError, list_gmail_messages
+
+    try:
+        limit = max(1, min(max_resultados, 20))
+        result = await list_gmail_messages(consulta, limit)
+        return _json_result(result)
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
+@mcp.tool
+async def ler_email_gmail(id_mensagem: str) -> str:
+    """
+    Le o conteudo completo de um email do Gmail.
+
+    Args:
+        id_mensagem: ID retornado por listar_emails_gmail.
+    """
+    from thina.integrations.google import GoogleError, get_gmail_message
+
+    try:
+        result = await get_gmail_message(id_mensagem.strip())
+        return _json_result(result)
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
+@mcp.tool
+async def listar_arquivos_drive(
+    consulta: str = "",
+    max_resultados: int = 15,
+) -> str:
+    """
+    Lista arquivos recentes no Google Drive do usuario.
+
+    Args:
+        consulta: Filtro Drive (ex: name contains 'orcamento', mimeType='application/pdf').
+        max_resultados: Quantidade maxima (1-30).
+    """
+    from thina.integrations.google import GoogleError, list_drive_files
+
+    try:
+        limit = max(1, min(max_resultados, 30))
+        result = await list_drive_files(consulta, limit)
+        return _json_result(result)
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
+@mcp.tool
+async def ler_arquivo_drive(id_arquivo: str) -> str:
+    """
+    Le o texto de um arquivo do Google Drive (Docs exportados como texto, arquivos .txt/.json etc.).
+
+    Args:
+        id_arquivo: ID retornado por listar_arquivos_drive.
+    """
+    from thina.integrations.google import GoogleError, read_drive_file
+
+    try:
+        result = await read_drive_file(id_arquivo.strip())
+        return _json_result(result)
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
+@mcp.tool
+async def listar_eventos_agenda(
+    dias: int = 7,
+    max_resultados: int = 10,
+) -> str:
+    """
+    Lista proximos eventos do Google Calendar (agenda principal).
+
+    Args:
+        dias: Janela de dias a partir de hoje (1-30).
+        max_resultados: Quantidade maxima de eventos (1-20).
+    """
+    from thina.integrations.google import GoogleError, list_calendar_events
+
+    try:
+        window = max(1, min(dias, 30))
+        limit = max(1, min(max_resultados, 20))
+        result = await list_calendar_events(window, limit)
+        return _json_result(result)
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
+@mcp.tool
+async def abrir_arquivo_drive(
+    id_arquivo: str,
+    navegador: str | None = None,
+) -> str:
+    """
+    Abre um arquivo do Google Drive no navegador do PC.
+
+    Args:
+        id_arquivo: ID retornado por listar_arquivos_drive.
+        navegador: Opcional — chrome, edge ou firefox.
+    """
+    from thina.integrations.google import GoogleError, get_drive_file_link
+    from thina.pc.actions import abrir_site as _abrir_site
+
+    try:
+        link = await get_drive_file_link(id_arquivo.strip())
+        if not link.get("ok", True):
+            return _json_result(link)
+        open_result = await _abrir_site(link["webViewLink"], navegador)
+        return _json_result({"ok": True, "arquivo": link, "navegador": open_result})
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
+@mcp.tool
+async def criar_evento_agenda(
+    titulo: str,
+    inicio: str,
+    fim: str,
+    local: str = "",
+    descricao: str = "",
+) -> str:
+    """
+    Cria um evento no Google Calendar (agenda principal).
+
+    Args:
+        titulo: Nome do evento.
+        inicio: Data/hora ISO (ex: 2026-06-01T16:00:00).
+        fim: Data/hora ISO de termino.
+        local: Endereco ou sala (opcional).
+        descricao: Detalhes adicionais (opcional).
+    """
+    from thina.integrations.google import GoogleError, create_calendar_event
+
+    try:
+        result = await create_calendar_event(titulo, inicio, fim, local, descricao)
+        return _json_result(result)
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
+@mcp.tool
+async def enviar_email_gmail(
+    para: str,
+    assunto: str,
+    corpo: str,
+) -> str:
+    """
+    Envia um email pelo Gmail do usuario.
+
+    Args:
+        para: Endereco do destinatario.
+        assunto: Assunto do email.
+        corpo: Texto da mensagem (sem HTML).
+    """
+    from thina.integrations.google import GoogleError, send_gmail_message
+
+    try:
+        result = await send_gmail_message(para, assunto, corpo)
+        return _json_result(result)
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
+@mcp.tool
+async def marcar_email_lido(id_mensagem: str) -> str:
+    """
+    Marca um email do Gmail como lido.
+
+    Args:
+        id_mensagem: ID retornado por listar_emails_gmail.
+    """
+    from thina.integrations.google import GoogleError, mark_gmail_read
+
+    try:
+        result = await mark_gmail_read(id_mensagem.strip())
+        return _json_result(result)
+    except GoogleError as exc:
+        return _json_result({"ok": False, "erro": str(exc)})
+
+
 def _patch_gemini_mcp_schema_filter() -> None:
     """
     Corrige incompatibilidade google-genai + FastMCP 3.x:
@@ -430,6 +628,50 @@ _PC_KEYWORDS = (
     "https://",
 )
 
+_GOOGLE_KEYWORDS = (
+    "gmail",
+    "e-mail",
+    "email",
+    "emails",
+    "correio",
+    "caixa de entrada",
+    "mensagem nova",
+    "mensagens novas",
+    "google drive",
+    "no drive",
+    "do drive",
+    "meu drive",
+    "arquivo no google",
+    "documento no google",
+    "google calendar",
+    "google agenda",
+    "minha agenda",
+    "na agenda",
+    "compromisso",
+    "compromissos",
+    "reuniao",
+    "reunião",
+    "evento amanha",
+    "evento amanhã",
+    "eventos amanha",
+    "eventos amanhã",
+    "criar evento",
+    "cria evento",
+    "agendar",
+    "agenda ",
+    "marcar na agenda",
+    "marca na agenda",
+    "abrir arquivo",
+    "abre o arquivo",
+    "abre arquivo",
+    "enviar email",
+    "envia email",
+    "mandar email",
+    "manda email",
+    "marcar como lido",
+    "marca como lido",
+)
+
 
 def _needs_home_tools(texto: str) -> bool:
     """True se o pedido provavelmente exige ferramentas do Home Assistant."""
@@ -447,9 +689,33 @@ def _needs_pc_tools(texto: str) -> bool:
     return any(k in t for k in _PC_KEYWORDS)
 
 
+def _needs_google_tools(texto: str) -> bool:
+    """True se o pedido provavelmente exige Gmail, Drive ou Calendar."""
+    if not get_settings().google_enabled:
+        return False
+    if _is_weather_question(texto):
+        return False
+    t = texto.lower()
+    return any(k in t for k in _GOOGLE_KEYWORDS)
+
+
 def _needs_mcp_tools(texto: str) -> bool:
-    """Casa (HA) ou PC (apps/sites) — ambos usam o subprocess MCP."""
-    return _needs_home_tools(texto) or _needs_pc_tools(texto)
+    """Casa (HA), PC (apps/sites) ou Google — subprocess MCP."""
+    return _needs_home_tools(texto) or _needs_pc_tools(texto) or _needs_google_tools(texto)
+
+
+def _mcp_mode_label(texto: str) -> str:
+    """Rotulo de log para o modo MCP ativo."""
+    parts: list[str] = []
+    if _needs_home_tools(texto):
+        parts.append("casa")
+    if _needs_pc_tools(texto):
+        parts.append("PC")
+    if _needs_google_tools(texto):
+        parts.append("Google")
+    if not parts:
+        return "MCP"
+    return "MCP (" + " + ".join(parts) + ")"
 
 
 def _build_contents(
@@ -604,15 +870,7 @@ async def processar_mensagem(
 
     usar_mcp = _needs_mcp_tools(texto)
     usar_pesquisa = settings.gemini_google_search and not usar_mcp
-    if usar_mcp:
-        if _needs_pc_tools(texto) and _needs_home_tools(texto):
-            modo = "MCP (casa + PC)"
-        elif _needs_pc_tools(texto):
-            modo = "MCP (PC)"
-        else:
-            modo = "MCP (casa)"
-    else:
-        modo = "Google Search"
+    modo = _mcp_mode_label(texto) if usar_mcp else "Google Search"
     logger.info(
         "Processando com Gemini (%s) | modo=%s | texto=%s",
         settings.gemini_model,

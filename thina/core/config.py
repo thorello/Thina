@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     pc_commands_enabled: bool = False
     pc_apps_map_file: str = "maps/pc_apps.json"
 
+    # Google (Gmail, Drive, Calendar) — OAuth em data/google_*.json ou CLIENT_ID/SECRET
+    google_enabled: bool = False
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_credentials_file: str = "data/google_credentials.json"
+    google_token_file: str = "data/google_token.json"
+    google_timezone: str = "America/Sao_Paulo"
+
     # Mapas e MCP
     areas_map_file: str = "maps/areas.json"
     thina_user_context_file: str = "maps/thina_user.md"

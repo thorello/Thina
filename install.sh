@@ -93,8 +93,8 @@ fi
 echo ""
 echo "=== Instalacao concluida ==="
 if [[ "$NATIVE_ONLY" != true ]]; then
-  echo "  Docker:  docker compose up -d --build"
+  echo "  Docker:  ./start-docker.sh --build"
 fi
 if [[ "$DOCKER_ONLY" != true ]]; then
-  echo "  Nativo:  ./scripts/start-services.sh (se existir) ou python main.py"
+  echo "  Nativo:  .venv/bin/python main.py  (modo dev; ver docs/instalacao.md)"
 fi

@@ -14,47 +14,41 @@ Home Assistant (Whisper STT)
         └─► HA media_player.play_media → ReSpeaker do cômodo
 ```
 
-## Pré-requisitos
+## Instalação
 
-- **Docker** (Docker Desktop ou Docker no WSL) — recomendado para stack completa
-- **Python 3.10+** — modo nativo (Windows/Linux/macOS)
-- Chave LLM (`DEEPSEEK_API_KEY` ou `GEMINI_API_KEY`)
-- Home Assistant com token de longa duração (`HOME_ASSISTANT_TOKEN`)
+**Guia completo:** [**docs/instalacao.md**](docs/instalacao.md) — Windows (Docker Desktop / WSL) e Mac (Docker Desktop).
 
-O **Kokoro TTS** vem como submódulo Git em [`kokoro/`](kokoro/) (repositório [thorello/kokoro](https://github.com/thorello/kokoro)).
-
-## Instalação rápida
-
-Clone o repositório **com submódulos** e rode o instalador:
+Resumo:
 
 ```powershell
+# Windows
 git clone --recurse-submodules https://github.com/thorello/Thina.git
 cd Thina
 .\install.ps1
+# Edite .env (chave LLM, etc.)
+.\start-docker.ps1 -Build    # primeira vez; depois .\start-docker.ps1
 ```
-
-Linux/macOS:
 
 ```bash
+# macOS
 git clone --recurse-submodules https://github.com/thorello/Thina.git
 cd Thina
-chmod +x install.sh
-./install.sh
+chmod +x install.sh start-docker.sh stop-docker.sh
+./install.sh --docker-only
+# Edite .env
+./start-docker.sh --build    # primeira vez; depois ./start-docker.sh
 ```
 
-O `install` cria `.env`, pastas em `data/`, clona o Kokoro (se faltar) e opcionalmente os ambientes Python.
+| Serviço | URL |
+|---------|-----|
+| Home Assistant | http://localhost:8123 |
+| Kokoro TTS | http://localhost:8000 |
+| Thina API | http://localhost:8080/health |
+| Painel UI | http://localhost:8080/ui/ |
 
-Edite `.env` com suas chaves e URLs antes de subir os serviços.
+Após subir: onboarding do HA em `:8123`, token long-lived em `HOME_ASSISTANT_TOKEN`, `docker compose restart thina`.
 
-### Instalação manual (sem script)
-
-```powershell
-git submodule update --init --recursive
-copy .env.example .env
-python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-cd kokoro && python -m venv .venv && .\.venv\Scripts\pip install -r requirements.txt
-```
+Integração ReSpeaker: [docs/integracao-respeaker-lite.md](docs/integracao-respeaker-lite.md).
 
 ## Configuração
 
@@ -131,63 +125,19 @@ Edite [`maps/areas.json`](maps/areas.json):
 
 O `area_id` enviado pelo HA deve corresponder a uma chave deste ficheiro.
 
-## Executar
+## Executar (Docker)
 
-### Stack Docker (recomendado — HA + Kokoro + Thina)
+Comandos do dia a dia — detalhes em [docs/instalacao.md](docs/instalacao.md):
 
-Um único `docker-compose.yml` na raiz sobe os três serviços:
+| Ação | Windows | macOS |
+|------|---------|-------|
+| Subir | `.\start-docker.ps1` | `./start-docker.sh` |
+| Parar | `.\stop-docker.ps1` | `./stop-docker.sh` |
+| Rebuild | `.\start-docker.ps1 -Build` | `./start-docker.sh --build` |
 
-```powershell
-.\start-docker.ps1           # docker compose up -d --build
-.\stop-docker.ps1
-.\scripts\restart-docker.ps1
-```
+Modo nativo Windows (dev, comandos de PC): ver [seção avançada](docs/instalacao.md#avançado-modo-nativo-windows).
 
-Linux/macOS:
-
-```bash
-docker compose up -d --build
-docker compose down
-```
-
-| Serviço | URL |
-|---------|-----|
-| Home Assistant | http://localhost:8123 |
-| Kokoro TTS | http://localhost:8000 |
-| Thina API | http://localhost:8080/health |
-| Painel UI | http://localhost:8080/ui/ |
-
-Config persistente do HA: `data/homeassistant/`. Na primeira vez, crie o utilizador no HA e grave o token em `HOME_ASSISTANT_TOKEN`.
-
-No modo Docker, `THINA_PUBLIC_URL` é `http://thina:8080` (rede interna do compose) — o HA baixa o WAV por esse hostname.
-
-Comandos no PC Windows (`PC_COMMANDS_ENABLED`) **não funcionam dentro do container**; use o modo nativo abaixo se precisar controlar o PC.
-
-### Stack nativa (Windows — desenvolvimento)
-
-Home Assistant via Docker no WSL; Kokoro e Thina como processos Python locais:
-
-```powershell
-.\start.ps1          # HA (:8123) + Kokoro (:8000) + Thina + npm run dev (:5173/ui/)
-.\stop.ps1
-.\restart.ps1
-.\scripts\status-services.ps1
-```
-
-Requisitos: WSL com `docker` funcional (`wsl docker version`). Config do HA em `data/homeassistant/`.
-Para desativar o HA nos scripts: `HOME_ASSISTANT_MANAGED=false` (HA noutro host).
-
-Ou:
-
-```powershell
-.\scripts\start-services.ps1
-.\scripts\stop-services.ps1
-.\scripts\restart-services.ps1
-```
-
-Logs dos processos nativos: `data/run/kokoro.*.log`, `data/run/thina.*.log`.
-
-### Apenas o servidor Thina
+### Apenas o servidor Thina (dev)
 
 ```powershell
 .\.venv\Scripts\python main.py

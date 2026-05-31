@@ -2,6 +2,10 @@
 
 Guia para ligar vários **ReSpeaker Lite Voice Assistant Kit** ao **thina-server**, usando o Home Assistant como ponte (STT no satélite → Thina → áudio no mesmo satélite).
 
+> **Instalação da stack:** se ainda não subiu HA + Kokoro + Thina, comece por [instalacao.md](./instalacao.md).
+>
+> **Portas:** na **stack Docker** (guia de instalação), a Thina fica em **`:8080`**. O **`:8081`** aparece neste doc sobretudo no **modo nativo Windows** (conflito `wslrelay` com porta 8080). Ajuste URLs nos exemplos conforme o seu modo.
+
 Relacionado: [relatorio-fluxo-servicos.md](./relatorio-fluxo-servicos.md)
 
 ---
@@ -31,7 +35,7 @@ flowchart LR
         R2[ReSpeaker Lite]
     end
     HA[Home Assistant]
-    T[thina-server :8081]
+    T[thina-server :8080 ou :8081]
     K[Kokoro :8000]
 
     R1 -->|voz| HA
@@ -107,12 +111,13 @@ Reinicie o Thina após alterar o mapa (ou reinicie o processo `python main.py`).
 
 O Home Assistant precisa **baixar o WAV** gerado pelo Thina.
 
-| Cenário HA | `THINA_PUBLIC_URL` |
-|------------|-------------------|
-| HA em Docker no mesmo PC do Thina | `http://host.docker.internal:8081` |
-| HA noutro host na LAN | `http://<IP-do-PC-Thina>:8081` |
+| Cenário | `THINA_PUBLIC_URL` | Porta Thina |
+|---------|-------------------|-------------|
+| **Stack Docker unificada** ([instalacao.md](./instalacao.md)) | `http://thina:8080` (já no compose) | **8080** |
+| HA em Docker no mesmo PC, Thina **nativo** Windows | `http://host.docker.internal:8081` | **8081** (evita conflito WSL) |
+| HA noutro host na LAN | `http://<IP-do-PC-Thina>:8080` ou `:8081` | conforme `.env` |
 
-Exemplo `.env`:
+Exemplo `.env` (**modo nativo Windows** — Docker unificado não precisa destes overrides):
 
 ```env
 THINA_PORT=8081
